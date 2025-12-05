@@ -1,4 +1,4 @@
-/* FitTrack v18.0 樣式表 */
+/* FitTrack v19.0 極簡樣式表 */
 
 :root {
     --primary-color: #4361ee;
@@ -16,45 +16,54 @@ body {
 }
 
 /* =========================================
-   [新增] 維護模式遮罩
+   [修改] 極簡登入轉場 (Minimalist Transition)
    ========================================= */
-#maintenanceOverlay {
+#loginTransition {
     position: fixed;
     top: 0;
     left: 0;
     width: 100%;
     height: 100%;
-    background-color: #ffffff;
-    z-index: 20000; /* 最高層級，蓋過一切 */
+    background-color: #ffffff; /* 純白背景 */
+    z-index: 10000;
     display: flex;
     flex-direction: column;
     justify-content: center;
     align-items: center;
-    text-align: center;
+    
+    /* 預設隱藏 (透過 opacity 和 pointer-events) */
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.4s ease-in-out; 
 }
 
-.maintenance-img {
-    width: 150px;
-    margin-bottom: 2rem;
-    animation: bow 2s infinite ease-in-out;
+#loginTransition.active {
+    opacity: 1;
+    pointer-events: all;
 }
 
-@keyframes bow {
-    0%, 100% { transform: translateY(0); }
-    50% { transform: translateY(10px) rotate(-5deg); }
+/* 簡約的載入圈圈 */
+.simple-spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid #f3f3f3;
+    border-top: 3px solid var(--primary-color);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin-bottom: 15px;
 }
 
-/* 右下角隱藏按鈕 */
-.dev-backdoor {
-    position: absolute;
-    bottom: 20px;
-    right: 20px;
-    opacity: 0.1; /* 近乎隱形 */
-    transition: opacity 0.3s;
-    cursor: pointer;
-    font-size: 1.5rem;
+.transition-text {
+    font-size: 1.1rem;
+    color: #555;
+    font-weight: 500;
+    letter-spacing: 1px;
 }
-.dev-backdoor:hover { opacity: 1; }
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
 
 /* =========================================
    UI 元件樣式
@@ -73,6 +82,11 @@ body {
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
     backdrop-filter: blur(10px);
     transition: transform 0.3s;
+}
+
+#studentStats .card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 15px 35px rgba(67, 97, 238, 0.15);
 }
 
 .form-control, .form-select {
@@ -104,22 +118,11 @@ body {
     box-shadow: 0 8px 20px rgba(67, 97, 238, 0.4);
 }
 
-/* Modal 修復與美化 */
 .modal-content {
     border-radius: 20px;
     border: none;
     box-shadow: 0 20px 60px rgba(0,0,0,0.2);
 }
-
-/* 轉場動畫 */
-#loginTransition {
-    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-    background: var(--primary-gradient); z-index: 10000;
-    display: flex; flex-direction: column; justify-content: center; align-items: center;
-    color: white; transform: translateY(100%); transition: transform 0.5s cubic-bezier(0.77, 0, 0.175, 1);
-}
-#loginTransition.active { transform: translateY(0); }
-#loginTransition.slide-up { transform: translateY(-100%); }
 
 .d-none { display: none !important; }
 .animate-fade-up { animation: fadeInUp 0.6s ease forwards; }
@@ -133,3 +136,14 @@ body {
     display: inline-block;
     vertical-align: middle;
 }
+
+/* 維護模式遮罩 */
+#maintenanceOverlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background-color: #ffffff; z-index: 20000;
+    display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center;
+}
+.maintenance-img { width: 150px; margin-bottom: 2rem; animation: bow 2s infinite ease-in-out; }
+@keyframes bow { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(10px) rotate(-5deg); } }
+.dev-backdoor { position: absolute; bottom: 20px; right: 20px; opacity: 0.1; cursor: pointer; font-size: 1.5rem; }
+.dev-backdoor:hover { opacity: 1; }

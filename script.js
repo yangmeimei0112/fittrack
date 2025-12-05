@@ -1,5 +1,5 @@
 // --------------------------------------------------------
-// FitTrack 最終版邏輯 (v18.0 - 維運與教師輔助版)
+// FitTrack 最終版邏輯 (v21.0 - 強制登出修復版)
 // --------------------------------------------------------
 
 const SUPABASE_URL = 'https://szhdnodigzybxwnftdgm.supabase.co';
@@ -60,12 +60,11 @@ function playLoginAnimation(userName, callback) {
     text.textContent = `歡迎回來，${userName || '使用者'}！`;
     transitionLayer.classList.add('active');
     setTimeout(() => {
+        if (callback) callback();
         setTimeout(() => {
-            transitionLayer.classList.add('slide-up');
-            if (callback) callback();
-            setTimeout(() => { transitionLayer.classList.remove('active', 'slide-up'); }, 600);
-        }, 1500);
-    }, 500);
+            transitionLayer.classList.remove('active');
+        }, 800);
+    }, 1200);
 }
 
 function updateUserDisplay(data) {
@@ -80,26 +79,20 @@ function updateUserDisplay(data) {
     }
 }
 
-// ================= 2. 維運與權限控制 =================
+// ================= 2. 維運與權限 =================
 
-// 檢查維護模式
 function checkMaintenanceMode(scope) {
     const overlay = document.getElementById('maintenanceOverlay');
     const modes = systemSettings.maintenance_mode;
-    if (modes && modes[scope]) {
-        overlay.classList.remove('d-none');
-    } else {
-        overlay.classList.add('d-none');
-    }
+    if (modes && modes[scope]) overlay.classList.remove('d-none');
+    else overlay.classList.add('d-none');
 }
 
-// 載入系統設定
 async function loadSystemSettings() {
     const { data } = await supabase.from('system_settings').select('value').eq('key', 'maintenance_mode').maybeSingle();
     if (data) systemSettings.maintenance_mode = data.value;
 }
 
-// 儲存系統設定
 async function saveSystemSettings() {
     const newSettings = {
         login: document.getElementById('maintLogin').checked,
@@ -112,7 +105,6 @@ async function saveSystemSettings() {
     else {
         showAlert('成功', '設定已更新', 'success');
         systemSettings.maintenance_mode = newSettings;
-        // 立即生效：檢查當前頁面
         if(!currentUserId) checkMaintenanceMode('login');
     }
 }
@@ -124,7 +116,7 @@ function toggleView(isLoggedIn) {
         authSection.classList.add('d-none'); authSection.classList.remove('d-flex'); mainApp.classList.remove('d-none');
     } else {
         mainApp.classList.add('d-none'); authSection.classList.remove('d-none'); authSection.classList.add('d-flex');
-        checkMaintenanceMode('login'); // 登出回首頁時檢查
+        checkMaintenanceMode('login');
     }
 }
 
@@ -155,9 +147,8 @@ function showLogin() {
 }
 
 function openCityModal() {
-    checkMaintenanceMode('quick'); // 檢查快速登入維護
+    checkMaintenanceMode('quick');
     if (systemSettings.maintenance_mode.quick) return;
-
     const modalBody = document.getElementById('cityButtonsArea');
     modalBody.innerHTML = '';
     taiwanCities.forEach(city => {
@@ -219,13 +210,13 @@ function applyRoleUI(role) {
     const badge = document.getElementById('roleBadge');
 
     if (role === 'teacher') {
-        checkMaintenanceMode('teacher'); // 老師維護檢查
+        checkMaintenanceMode('teacher');
         document.getElementById('navItemStudent').style.display = 'none';
         document.getElementById('navItemProfile').style.display = 'none';
         badge.textContent = '老師版'; badge.className = 'badge bg-danger ms-2';
         new bootstrap.Tab(document.querySelector('#pills-teacher-tab')).show();
     } else {
-        checkMaintenanceMode('student'); // 學生維護檢查
+        checkMaintenanceMode('student');
         document.getElementById('navItemTeacher').style.display = 'none';
         document.getElementById('navItemAdmin').style.display = 'none';
         badge.textContent = '學生版'; badge.className = 'badge bg-success ms-2';
@@ -242,7 +233,7 @@ async function loadDevices() {
         sel.innerHTML = '';
         if (data) data.forEach(d => sel.innerHTML += `<option value="${d.id}">${d.device_name} (${d.type})</option>`);
         else sel.innerHTML = '<option value="">手動輸入 (Manual)</option>';
-    } catch (e) {}
+    } catch (e) { console.log('Device load skipped'); }
 }
 
 async function initAppData() {
@@ -307,19 +298,24 @@ function renderTrendChart(records) {
     });
 }
 
-// ================= 4. AUTH & 系統邏輯 =================
+// ================= 4. AUTH =================
 
 document.addEventListener('DOMContentLoaded', async () => {
-    await loadSystemSettings(); // 先載入設定
-    
+    await loadSystemSettings();
     const { data: { session } } = await supabase.auth.getSession();
-    if (session) handleLoginSuccess(session, true); 
-    else toggleView(false); // 這會觸發 checkMaintenanceMode('login')
+    if (session) handleLoginSuccess(session, true); // true = skip animation
+    else toggleView(false);
 });
 
+// [重要修復] 登出邏輯處理
 supabase.auth.onAuthStateChange(async (event, session) => {
-    if (event === 'SIGNED_IN' && session) handleLoginSuccess(session, false);
-    else if (event === 'SIGNED_OUT') toggleView(false);
+    if (event === 'SIGNED_IN' && session) {
+        handleLoginSuccess(session, false);
+    } else if (event === 'SIGNED_OUT') {
+        currentUserId = null;
+        currentUserRole = null;
+        toggleView(false); // 確保 UI 切換回登入頁
+    }
 });
 
 async function handleLoginSuccess(session, skipAnim = false) {
@@ -335,7 +331,6 @@ async function handleLoginSuccess(session, skipAnim = false) {
     };
 
     if (skipAnim) {
-        // 如果重新整理，且遇到維護模式，要強制覆蓋
         checkMaintenanceMode(currentUserRole);
         loadUI();
     } else {
@@ -383,9 +378,7 @@ document.getElementById('signupForm').addEventListener('submit', async (e) => {
                 age: document.getElementById('regAge').value,
                 grade: 1
             }]);
-            if (dbError) {
-                if(dbError.message.includes("duplicate key")) showAlert('重複', '帳號已存在', 'info'); else showAlert('錯誤', dbError.message, 'error');
-            } else {
+            if (dbError) { if(dbError.message.includes("duplicate key")) showAlert('重複', '帳號已存在', 'info'); else showAlert('錯誤', dbError.message, 'error'); } else {
                 const h = document.getElementById('regHeight').value; const w = document.getElementById('regWeight').value;
                 if (h || w) { const rec = []; const now = new Date().toISOString(); if(h) rec.push({ student_id: data.user.id, code: 'height', value: h, unit: 'cm', effective_datetime: now }); if(w) rec.push({ student_id: data.user.id, code: 'weight', value: w, unit: 'kg', effective_datetime: now }); await supabase.from('health_records').insert(rec); }
                 showAlert('成功', '註冊成功！', 'success');
@@ -394,21 +387,28 @@ document.getElementById('signupForm').addEventListener('submit', async (e) => {
     }
 });
 
-async function logout() { await supabase.auth.signOut(); window.location.reload(); }
+// [修復] 強制登出並重整，確保狀態清空
+async function logout() {
+    try {
+        await supabase.auth.signOut();
+    } catch (error) {
+        console.log("Signout error:", error);
+    } finally {
+        localStorage.clear(); // 清除所有暫存
+        window.location.reload(); // 強制重整，回到初始狀態
+    }
+}
 
 async function loadStudentListForTeacher() {
     const { data } = await supabase.from('students').select('id, name, student_id').order('student_id');
-    const s2 = document.getElementById('teacherStudentSelect');
-    s2.innerHTML = '<option selected disabled>請選擇學生...</option>';
+    const s2 = document.getElementById('teacherStudentSelect'); s2.innerHTML = '<option selected disabled>請選擇學生...</option>';
     if (data) { data.forEach(s => s2.innerHTML += `<option value="${s.id}" data-sid="${s.student_id}">${s.student_id} ${s.name}</option>`); }
     
-    // [新增] 綁定選擇事件
     s2.addEventListener('change', async (e) => {
         const studentId = e.target.value;
         const { data: student } = await supabase.from('students').select('*').eq('id', studentId).single();
         const { data: history } = await supabase.from('health_records').select('*').eq('student_id', studentId).order('effective_datetime', {ascending: false}).limit(3);
         
-        // 更新右側面板
         document.getElementById('teacherStudentInfo').classList.add('d-none');
         document.getElementById('teacherStudentDetail').classList.remove('d-none');
         
@@ -428,39 +428,15 @@ async function loadStudentListForTeacher() {
                 if(type==='run800') type='800m'; else if(type==='height') type='身高'; else if(type==='weight') type='體重'; else if(type==='heartrate') type='心率';
                 list.innerHTML += `<li class="list-group-item d-flex justify-content-between align-items-center">${type} <span class="badge bg-light text-dark">${r.value} ${r.unit}</span> <small class="text-muted">${date}</small></li>`;
             });
-        } else {
-            list.innerHTML = '<li class="list-group-item text-muted">無歷史資料</li>';
-        }
+        } else { list.innerHTML = '<li class="list-group-item text-muted">無歷史資料</li>'; }
     });
 }
 
-// ... (loadClassStats, profileForm, devAdmin, export/import, scanner 同前，省略以節省篇幅) ...
+// ... (省略重複輔助函式) ...
 async function loadClassStats() { const { data: records } = await supabase.from('health_records').select('*, students(name)'); if (!records || !records.length) return; const avg = (code) => { const v = records.filter(r => r.code === code).map(r => Number(r.value)); return v.length ? (v.reduce((a,b)=>a+b,0)/v.length).toFixed(1) : '--'; }; document.getElementById('avgRun').textContent = avg('run800'); document.getElementById('avgHR').textContent = avg('heartrate'); document.getElementById('avgBMI').textContent = '21.5'; const runs = records.filter(r => r.code === 'run800').map(r => Number(r.value)); const buckets = [0,0,0,0]; runs.forEach(v => { if (v < 200) buckets[0]++; else if (v < 250) buckets[1]++; else if (v < 300) buckets[2]++; else buckets[3]++; }); const ctx = document.getElementById('classHistogram').getContext('2d'); if (classChart) classChart.destroy(); classChart = new Chart(ctx, { type: 'bar', data: { labels: ['<200', '200-250', '250-300', '>300'], datasets: [{ label: '人數', data: buckets, backgroundColor: '#0d6efd' }] } }); }
 document.getElementById('profileForm').addEventListener('submit', async (e) => { e.preventDefault(); const name = document.getElementById('profileName').value; const school = document.getElementById('profileSchool').value; const class_n = document.getElementById('profileClass').value; const seat = document.getElementById('profileSeat').value; const age = document.getElementById('profileAge').value; const height = document.getElementById('profileHeight').value; const weight = document.getElementById('profileWeight').value; const { error } = await supabase.from('students').update({ name, school_name: school, class_name: class_n, seat_number: seat ? Number(seat) : null, age: age ? Number(age) : null }).eq('id', currentUserId); if (error) showAlert('錯誤', '儲存失敗', 'error'); else { const records = []; const now = new Date().toISOString(); if(height) records.push({ student_id: currentUserId, code: 'height', value: height, unit: 'cm', effective_datetime: now }); if(weight) records.push({ student_id: currentUserId, code: 'weight', value: weight, unit: 'kg', effective_datetime: now }); if(records.length > 0) await supabase.from('health_records').insert(records); showAlert('成功', '資料已更新', 'success'); loadStudentData(); loadStudentProfile(); } });
-async function openDevAdmin() { 
-    // 檢查有無密碼，如果從維護頁面進來，可能需要強制輸入
-    const pwd = prompt("密碼："); 
-    if (pwd === "15110") { 
-        // 隱藏維護遮罩 (如果是從遮罩點進來的)
-        document.getElementById('maintenanceOverlay').classList.add('d-none');
-        
-        const modal = new bootstrap.Modal(document.getElementById('devAdminModal'));
-        modal.show();
-        loadDevUserList();
-        
-        // 載入當前設定到開關
-        const s = systemSettings.maintenance_mode || {};
-        document.getElementById('maintLogin').checked = s.login;
-        document.getElementById('maintStudent').checked = s.student;
-        document.getElementById('maintTeacher').checked = s.teacher;
-        document.getElementById('maintQuick').checked = s.quick;
-    } else if (pwd !== null) showAlert('錯誤', '密碼錯誤', 'error'); 
-}
-function closeDevAdmin() { 
-    // 如果現在是維護模式，關閉開發者視窗後要再顯示遮罩
-    // 這裡簡化處理：重新整理網頁
-    window.location.reload();
-}
+async function openDevAdmin() { const pwd = prompt("密碼："); if (pwd === "15110") { document.getElementById('maintenanceOverlay').classList.add('d-none'); new bootstrap.Modal(document.getElementById('devAdminModal')).show(); loadDevUserList(); const s = systemSettings.maintenance_mode || {}; document.getElementById('maintLogin').checked = s.login; document.getElementById('maintStudent').checked = s.student; document.getElementById('maintTeacher').checked = s.teacher; document.getElementById('maintQuick').checked = s.quick; } else if (pwd !== null) showAlert('錯誤', '密碼錯誤', 'error'); }
+function closeDevAdmin() { window.location.reload(); }
 async function loadDevUserList() { const tbody = document.getElementById('devUserTableBody'); tbody.innerHTML = ''; const { data: s } = await supabase.from('students').select('*'); const { data: t } = await supabase.from('teachers_list').select('*'); if(t) t.forEach(x => { let status = x.is_approved ? '<span class="badge bg-primary">已啟用</span>' : '<span class="badge bg-warning text-dark">待審核</span>'; let btn = x.is_approved ? `<button class="btn btn-sm btn-outline-danger" onclick="devDelete('${x.id}','teacher')">刪</button>` : `<button class="btn btn-sm btn-success me-1" onclick="devApprove('${x.id}')">通</button><button class="btn btn-sm btn-outline-danger" onclick="devDelete('${x.id}','teacher')">駁</button>`; tbody.innerHTML += `<tr class="table-warning"><td>老師</td><td>${x.name}</td><td>${x.email}</td><td>${status}</td><td>${btn}</td></tr>`; }); if(s) s.forEach(x => { tbody.innerHTML += `<tr><td>學生</td><td>${x.name}</td><td>${x.student_id}</td><td>正常</td><td><button class="btn btn-sm btn-outline-secondary" onclick="devDelete('${x.id}','student')">刪</button></td></tr>`; }); }
 async function devApprove(id) { await supabase.from('teachers_list').update({is_approved:true}).eq('id',id); loadDevUserList(); }
 async function devDelete(id, type) { if(!confirm('刪除？')) return; await supabase.from(type==='student'?'students':'teachers_list').delete().eq('id',id); loadDevUserList(); }
