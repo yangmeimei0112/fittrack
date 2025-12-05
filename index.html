@@ -44,7 +44,6 @@
                     <div class="form-floating mb-3"><input type="email" class="form-control" id="loginEmail" placeholder="Email" required><label>電子信箱</label></div>
                     <div class="form-floating mb-4"><input type="password" class="form-control" id="loginPassword" placeholder="Password" required><label>密碼</label></div>
                     <button type="submit" class="btn btn-primary w-100 py-3 mb-3">登入系統</button>
-                    <p id="loginMsg" class="text-danger small fw-bold"></p>
                 </form>
                 <div class="d-flex align-items-center mb-4"><hr class="flex-grow-1"><span class="mx-3 small text-muted">or</span><hr class="flex-grow-1"></div>
                 <div class="d-grid gap-2"><button class="btn btn-outline-success btn-sm" onclick="showSignup('student')">註冊「學生」帳號</button><button class="btn btn-outline-danger btn-sm" onclick="showSignup('teacher')">註冊「老師」帳號</button></div>
@@ -71,7 +70,6 @@
                         <div class="row g-2 mb-4"><div class="col-6"><label class="form-label small text-muted">身高 (cm)</label><input type="number" class="form-control" id="regHeight" step="0.1"></div><div class="col-6"><label class="form-label small text-muted">體重 (kg)</label><input type="number" class="form-control" id="regWeight" step="0.1"></div></div>
                     </div>
                     <button type="submit" class="btn btn-dark w-100 py-2 mb-3" id="signupBtnText">確認註冊</button>
-                    <p id="signupMsg" class="text-danger small text-center"></p>
                 </form>
                 <div class="text-center mt-3"><button class="btn btn-link text-decoration-none text-secondary" onclick="showLogin()">返回登入</button></div>
             </div>
@@ -88,6 +86,7 @@
                 </div>
             </div>
         </nav>
+
         <div class="container mt-4 mb-5">
             <ul class="nav nav-pills mb-4 nav-fill p-1 bg-white rounded shadow-sm" id="pills-tab" role="tablist">
                 <li class="nav-item" id="navItemStudent"><button class="nav-link active rounded-pill" id="pills-student-tab" data-bs-toggle="pill" data-bs-target="#pills-student">🧑‍🎓 學生儀表板</button></li>
@@ -95,9 +94,13 @@
                 <li class="nav-item" id="navItemTeacher"><button class="nav-link rounded-pill" id="pills-teacher-tab" data-bs-toggle="pill" data-bs-target="#pills-teacher">👨‍🏫 老師輸入</button></li>
                 <li class="nav-item" id="navItemAdmin"><button class="nav-link rounded-pill" id="pills-admin-tab" data-bs-toggle="pill" data-bs-target="#pills-admin">⚙️ 報表管理</button></li>
             </ul>
+
             <div class="tab-content" id="pills-tabContent">
                 <div class="tab-pane fade show active" id="pills-student">
-                    <div class="d-flex justify-content-between align-items-center mb-4"><h3 class="fw-bold text-dark mb-0">👋 <span id="welcomeName">同學</span>，歡迎回來</h3><button class="btn btn-primary rounded-pill px-4" onclick="showMyQRCode()">📱 我的 QR Code</button></div>
+                    <div class="d-flex justify-content-between align-items-center mb-4">
+                        <h3 class="fw-bold text-dark mb-0">👋 <span id="welcomeName">同學</span>，歡迎回來</h3>
+                        <button class="btn btn-primary rounded-pill px-4" onclick="showMyQRCode()">📱 我的 QR Code</button>
+                    </div>
                     <select class="form-select d-none" id="studentSelect"><option selected disabled>載入中...</option></select>
                     <div id="qrDisplayArea" class="alert alert-light border text-center d-none mb-4 shadow-sm"><h6 class="text-muted mb-3">請出示給老師掃描</h6><div id="qrcode" class="d-flex justify-content-center"></div></div>
                     <div id="studentStats" class="animate-fade-up">
@@ -108,9 +111,21 @@
                             <div class="col-md-3"><div class="card h-100 p-3"><h6 class="text-muted mb-2">心率</h6><h2 id="displayHR" class="fw-bold text-dark">--</h2><small class="text-muted">bpm</small></div></div>
                             <div class="col-md-3"><div class="card h-100 p-3"><h6 class="text-muted mb-2">身高</h6><h2 id="displayHeight" class="fw-bold text-dark">--</h2><small class="text-muted">cm</small></div></div>
                         </div>
-                        <div class="card p-4 shadow-sm"><h5 class="card-title fw-bold mb-4">📈 歷史趨勢圖</h5><canvas id="trendChart" height="100"></canvas></div>
+                        <div class="card p-4 shadow-sm mb-4"><h5 class="card-title fw-bold mb-4">📈 歷史趨勢圖</h5><canvas id="trendChart" height="100"></canvas></div>
+                        
+                        <div class="card p-4 shadow-sm">
+                            <h5 class="card-title fw-bold mb-3">📜 歷史紀錄列表</h5>
+                            <div class="table-responsive" style="max-height: 300px;">
+                                <table class="table table-hover align-middle">
+                                    <thead class="table-light sticky-top"><tr><th>項目</th><th>數值</th><th>單位</th><th>測量時間</th></tr></thead>
+                                    <tbody id="studentHistoryTableBody">
+                                        </tbody>
+                                </table>
+                            </div>
+                        </div>
                     </div>
                 </div>
+
                 <div class="tab-pane fade" id="pills-profile">
                     <div class="card p-4 shadow-sm mx-auto" style="max-width: 800px;">
                         <h4 class="mb-4 fw-bold text-primary">編輯個人資料</h4>
@@ -129,6 +144,7 @@
                         </form>
                     </div>
                 </div>
+
                 <div class="tab-pane fade" id="pills-teacher">
                     <div class="row g-4">
                         <div class="col-lg-4">
@@ -137,7 +153,10 @@
                                 <form id="recordForm">
                                     <div class="mb-3"><label class="form-label small text-muted">選擇學生</label><div class="input-group"><select class="form-select" id="teacherStudentSelect" required></select><button class="btn btn-outline-secondary" type="button" onclick="startScanner()">📷</button></div></div>
                                     <div class="mb-3"><label class="form-label small text-muted">裝置</label><select class="form-select" id="deviceSelect"></select></div>
-                                    <div class="row g-2 mb-4"><div class="col-6"><label class="form-label small text-muted">項目</label><select class="form-select" id="recordType"><option value="height">身高</option><option value="weight">體重</option><option value="run800">800m</option><option value="heartrate">心率</option></select></div><div class="col-6"><label class="form-label small text-muted">數值</label><input type="number" class="form-control" id="recordValue" step="0.1" required></div></div>
+                                    <div class="row g-2 mb-4">
+                                        <div class="col-6"><label class="form-label small text-muted">項目</label><select class="form-select" id="recordType"><option value="height">身高</option><option value="weight">體重</option><option value="run800">800m</option><option value="heartrate">心率</option></select></div>
+                                        <div class="col-6"><label class="form-label small text-muted">數值</label><input type="number" class="form-control" id="recordValue" step="0.1" required></div>
+                                    </div>
                                     <button type="submit" class="btn btn-success w-100 rounded-pill">💾 儲存並上傳</button>
                                 </form>
                             </div>
@@ -149,9 +168,7 @@
                                 <div id="teacherStudentDetail" class="d-none animate-fade-up">
                                     <h4 class="fw-bold" id="infoName">姓名</h4>
                                     <p class="text-secondary mb-3"><span id="infoSchool">學校</span> | <span id="infoClass">班</span> <span id="infoSeat">號</span></p>
-                                    <hr>
-                                    <h6 class="text-muted small fw-bold">最近 3 筆紀錄</h6>
-                                    <ul class="list-group list-group-flush small" id="infoHistoryList"></ul>
+                                    <hr><h6 class="text-muted small fw-bold">最近 3 筆紀錄</h6><ul class="list-group list-group-flush small" id="infoHistoryList"></ul>
                                 </div>
                             </div>
                         </div>
@@ -164,6 +181,7 @@
                         </div>
                     </div>
                 </div>
+
                 <div class="tab-pane fade" id="pills-admin">
                     <div class="card p-4 shadow-sm">
                         <h5 class="fw-bold mb-3 text-dark">資料管理</h5>

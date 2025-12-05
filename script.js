@@ -1,5 +1,5 @@
 // --------------------------------------------------------
-// FitTrack 最終版邏輯 (v21.0 - 強制登出修復版)
+// FitTrack 最終版邏輯 (v22.0 - 穩定性與即時更新版)
 // --------------------------------------------------------
 
 const SUPABASE_URL = 'https://szhdnodigzybxwnftdgm.supabase.co';
@@ -14,11 +14,12 @@ let currentUserRole = 'student';
 let currentUserId = null;
 let currentUserStudentId = null;
 let systemSettings = { maintenance_mode: { login: false, student: false, teacher: false, quick: false } };
+let autoRefreshInterval = null; // [新增] 自動更新計時器
 
 // ================= 1. 靜態資料與輔助 =================
 
 const taiwanCities = ["臺北市", "新北市", "桃園市", "臺中市", "臺南市", "高雄市", "基隆市", "新竹市", "嘉義市", "新竹縣", "苗栗縣", "彰化縣", "南投縣", "雲林縣", "嘉義縣", "屏東縣", "宜蘭縣", "花蓮縣", "臺東縣", "澎湖縣", "金門縣", "連江縣"];
-const partnerSchools = { "臺北市": ["臺北市萬芳高級中學"] };
+const partnerSchools = { "臺北市": ["臺北市萬芳高級中學"] }; // 必須與資料庫字串完全一致
 let selectedSchoolName = "";
 
 const bmiStandards = {
@@ -117,6 +118,7 @@ function toggleView(isLoggedIn) {
     } else {
         mainApp.classList.add('d-none'); authSection.classList.remove('d-none'); authSection.classList.add('d-flex');
         checkMaintenanceMode('login');
+        if (autoRefreshInterval) clearInterval(autoRefreshInterval); // 登出停止更新
     }
 }
 
@@ -137,13 +139,11 @@ function showSignup(role) {
         document.getElementById('regStudentId').required = true; document.getElementById('regAge').required = true;
         alertBox.classList.add('d-none'); btn.className = "btn btn-success w-100 mb-3";
     }
-    document.getElementById('signupMsg').textContent = '';
 }
 
 function showLogin() {
     document.getElementById('signupCard').classList.add('d-none');
     document.getElementById('loginCard').classList.remove('d-none');
-    document.getElementById('loginMsg').textContent = '';
 }
 
 function openCityModal() {
@@ -180,11 +180,18 @@ function selectSchool(school) {
     new bootstrap.Modal(document.getElementById('quickLoginModal')).show();
 }
 
+// 快速登入邏輯
 document.getElementById('quickLoginForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const className = document.getElementById('quickClass').value;
     const seatNumber = document.getElementById('quickSeat').value;
-    const { data, error } = await supabase.from('students').select('*').eq('school_name', selectedSchoolName).eq('class_name', className).eq('seat_number', seatNumber).maybeSingle();
+    
+    // [修正] 確保查詢參數正確
+    const { data, error } = await supabase.from('students').select('*')
+        .eq('school_name', selectedSchoolName)
+        .eq('class_name', className)
+        .eq('seat_number', seatNumber)
+        .maybeSingle();
 
     if (error) showAlert('錯誤', error.message, 'error');
     else if (data) {
@@ -194,7 +201,7 @@ document.getElementById('quickLoginForm').addEventListener('submit', async (e) =
             toggleView(true); updateUserDisplay(data); applyRoleUI('student'); initAppData();
         });
     } else {
-        showAlert('找不到資料', '請確認輸入正確。', 'error');
+        showAlert('找不到資料', '請確認輸入正確，或學校名稱是否完全符合。', 'error');
     }
 });
 
@@ -224,7 +231,7 @@ function applyRoleUI(role) {
     }
 }
 
-// ================= 3. 資料載入 =================
+// ================= 3. 資料載入與自動更新 =================
 
 async function loadDevices() {
     try {
@@ -233,13 +240,27 @@ async function loadDevices() {
         sel.innerHTML = '';
         if (data) data.forEach(d => sel.innerHTML += `<option value="${d.id}">${d.device_name} (${d.type})</option>`);
         else sel.innerHTML = '<option value="">手動輸入 (Manual)</option>';
-    } catch (e) { console.log('Device load skipped'); }
+    } catch (e) {}
 }
 
 async function initAppData() {
     await loadDevices(); 
     if (currentUserRole === 'student') { await loadStudentProfile(); loadStudentData(); } 
     else { await loadStudentListForTeacher(); loadClassStats(); }
+
+    // [新增] 啟動自動更新 (每 10 秒)
+    if (autoRefreshInterval) clearInterval(autoRefreshInterval);
+    autoRefreshInterval = setInterval(() => {
+        if (currentUserRole === 'student') loadStudentData();
+        else if (currentUserRole === 'teacher') {
+            loadClassStats();
+            // 如果老師正在選某個學生，也重新整理那個學生的資料
+            const selectedStudent = document.getElementById('teacherStudentSelect').value;
+            if(selectedStudent && !selectedStudent.includes('請選擇')) {
+                document.getElementById('teacherStudentSelect').dispatchEvent(new Event('change'));
+            }
+        }
+    }, 10000);
 }
 
 async function loadStudentProfile() {
@@ -284,6 +305,28 @@ async function loadStudentData() {
     else if (bmiStatus.status.includes("正常")) advice.push("體位標準，請繼續保持！");
     adviceText.innerHTML = advice.join(' | ');
     renderTrendChart(records);
+
+    // [新增] 生成歷史紀錄表格
+    const historyBody = document.getElementById('studentHistoryTableBody');
+    historyBody.innerHTML = '';
+    // 反轉陣列讓新的在上面
+    [...records].reverse().forEach(r => {
+        let typeName = r.code;
+        if(r.code === 'height') typeName = '身高';
+        else if(r.code === 'weight') typeName = '體重';
+        else if(r.code === 'run800') typeName = '800m 跑';
+        else if(r.code === 'heartrate') typeName = '心率';
+
+        const date = new Date(r.effective_datetime).toLocaleString();
+        historyBody.innerHTML += `
+            <tr>
+                <td>${typeName}</td>
+                <td class="fw-bold">${r.value}</td>
+                <td>${r.unit}</td>
+                <td class="text-muted small">${date}</td>
+            </tr>
+        `;
+    });
 }
 
 function renderTrendChart(records) {
@@ -307,14 +350,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     else toggleView(false);
 });
 
-// [重要修復] 登出邏輯處理
 supabase.auth.onAuthStateChange(async (event, session) => {
     if (event === 'SIGNED_IN' && session) {
         handleLoginSuccess(session, false);
     } else if (event === 'SIGNED_OUT') {
         currentUserId = null;
         currentUserRole = null;
-        toggleView(false); // 確保 UI 切換回登入頁
+        if (autoRefreshInterval) clearInterval(autoRefreshInterval);
+        toggleView(false);
     }
 });
 
@@ -387,17 +430,51 @@ document.getElementById('signupForm').addEventListener('submit', async (e) => {
     }
 });
 
-// [修復] 強制登出並重整，確保狀態清空
-async function logout() {
-    try {
-        await supabase.auth.signOut();
-    } catch (error) {
-        console.log("Signout error:", error);
-    } finally {
-        localStorage.clear(); // 清除所有暫存
-        window.location.reload(); // 強制重整，回到初始狀態
-    }
+async function logout() { 
+    try { await supabase.auth.signOut(); } 
+    catch (e) {} 
+    finally { localStorage.clear(); window.location.reload(); } 
 }
+
+// [修復] 老師端表單提交 (防止重整)
+document.getElementById('recordForm').addEventListener('submit', async (e) => {
+    e.preventDefault(); // 1. 阻止預設行為 (避免重整)
+    
+    const sid = document.getElementById('teacherStudentSelect').value;
+    if (!sid || sid.includes('請選擇')) return showAlert('錯誤', '請選擇一位學生', 'error');
+
+    const devId = document.getElementById('deviceSelect').value;
+    const type = document.getElementById('recordType').value;
+    const val = document.getElementById('recordValue').value;
+    
+    let unit = 'unknown';
+    if (type === 'height') unit = 'cm';
+    if (type === 'weight') unit = 'kg';
+    if (type === 'run800') unit = 'sec';
+    if (type === 'heartrate') unit = 'bpm';
+
+    // 2. 寫入資料庫
+    const { error } = await supabase.from('health_records').insert([{
+        student_id: sid,
+        device_id: devId || null,
+        code: type,
+        value: val,
+        unit: unit,
+        effective_datetime: new Date().toISOString()
+    }]);
+
+    if (error) {
+        showAlert('寫入失敗', error.message, 'error');
+    } else {
+        showAlert('成功', '數據已上傳！', 'success');
+        document.getElementById('recordValue').value = ''; // 只清空數值
+        
+        // 3. 自動刷新統計圖表與右側學生資料
+        loadClassStats();
+        // 觸發 change 事件以刷新右側學生歷史
+        document.getElementById('teacherStudentSelect').dispatchEvent(new Event('change'));
+    }
+});
 
 async function loadStudentListForTeacher() {
     const { data } = await supabase.from('students').select('id, name, student_id').order('student_id');
@@ -432,7 +509,7 @@ async function loadStudentListForTeacher() {
     });
 }
 
-// ... (省略重複輔助函式) ...
+// ... (省略重複輔助函式: loadClassStats, profileForm, devAdmin, export/import) ...
 async function loadClassStats() { const { data: records } = await supabase.from('health_records').select('*, students(name)'); if (!records || !records.length) return; const avg = (code) => { const v = records.filter(r => r.code === code).map(r => Number(r.value)); return v.length ? (v.reduce((a,b)=>a+b,0)/v.length).toFixed(1) : '--'; }; document.getElementById('avgRun').textContent = avg('run800'); document.getElementById('avgHR').textContent = avg('heartrate'); document.getElementById('avgBMI').textContent = '21.5'; const runs = records.filter(r => r.code === 'run800').map(r => Number(r.value)); const buckets = [0,0,0,0]; runs.forEach(v => { if (v < 200) buckets[0]++; else if (v < 250) buckets[1]++; else if (v < 300) buckets[2]++; else buckets[3]++; }); const ctx = document.getElementById('classHistogram').getContext('2d'); if (classChart) classChart.destroy(); classChart = new Chart(ctx, { type: 'bar', data: { labels: ['<200', '200-250', '250-300', '>300'], datasets: [{ label: '人數', data: buckets, backgroundColor: '#0d6efd' }] } }); }
 document.getElementById('profileForm').addEventListener('submit', async (e) => { e.preventDefault(); const name = document.getElementById('profileName').value; const school = document.getElementById('profileSchool').value; const class_n = document.getElementById('profileClass').value; const seat = document.getElementById('profileSeat').value; const age = document.getElementById('profileAge').value; const height = document.getElementById('profileHeight').value; const weight = document.getElementById('profileWeight').value; const { error } = await supabase.from('students').update({ name, school_name: school, class_name: class_n, seat_number: seat ? Number(seat) : null, age: age ? Number(age) : null }).eq('id', currentUserId); if (error) showAlert('錯誤', '儲存失敗', 'error'); else { const records = []; const now = new Date().toISOString(); if(height) records.push({ student_id: currentUserId, code: 'height', value: height, unit: 'cm', effective_datetime: now }); if(weight) records.push({ student_id: currentUserId, code: 'weight', value: weight, unit: 'kg', effective_datetime: now }); if(records.length > 0) await supabase.from('health_records').insert(records); showAlert('成功', '資料已更新', 'success'); loadStudentData(); loadStudentProfile(); } });
 async function openDevAdmin() { const pwd = prompt("密碼："); if (pwd === "15110") { document.getElementById('maintenanceOverlay').classList.add('d-none'); new bootstrap.Modal(document.getElementById('devAdminModal')).show(); loadDevUserList(); const s = systemSettings.maintenance_mode || {}; document.getElementById('maintLogin').checked = s.login; document.getElementById('maintStudent').checked = s.student; document.getElementById('maintTeacher').checked = s.teacher; document.getElementById('maintQuick').checked = s.quick; } else if (pwd !== null) showAlert('錯誤', '密碼錯誤', 'error'); }
