@@ -1,4 +1,4 @@
-/* FitTrack v19.0 極簡樣式表 */
+/* FitTrack v23.0 極簡樣式表 */
 
 :root {
     --primary-color: #4361ee;
@@ -15,128 +15,6 @@ body {
     overflow-x: hidden;
 }
 
-/* =========================================
-   [修改] 極簡登入轉場 (Minimalist Transition)
-   ========================================= */
-#loginTransition {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background-color: #ffffff; /* 純白背景 */
-    z-index: 10000;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    
-    /* 預設隱藏 (透過 opacity 和 pointer-events) */
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.4s ease-in-out; 
-}
-
-#loginTransition.active {
-    opacity: 1;
-    pointer-events: all;
-}
-
-/* 簡約的載入圈圈 */
-.simple-spinner {
-    width: 40px;
-    height: 40px;
-    border: 3px solid #f3f3f3;
-    border-top: 3px solid var(--primary-color);
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-    margin-bottom: 15px;
-}
-
-.transition-text {
-    font-size: 1.1rem;
-    color: #555;
-    font-weight: 500;
-    letter-spacing: 1px;
-}
-
-@keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-}
-
-/* =========================================
-   UI 元件樣式
-   ========================================= */
-.navbar {
-    background: rgba(67, 97, 238, 0.95) !important;
-    backdrop-filter: blur(10px);
-    box-shadow: 0 4px 15px rgba(67, 97, 238, 0.1);
-    padding: 0.8rem 0;
-}
-
-.card {
-    border: none;
-    border-radius: 20px;
-    background: var(--glass-bg);
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
-    backdrop-filter: blur(10px);
-    transition: transform 0.3s;
-}
-
-#studentStats .card:hover {
-    transform: translateY(-5px);
-    box-shadow: 0 15px 35px rgba(67, 97, 238, 0.15);
-}
-
-.form-control, .form-select {
-    border-radius: 12px;
-    padding: 12px 15px;
-    border: 1px solid #e0e0e0;
-    background-color: #fff;
-}
-
-.form-control:focus, .form-select:focus {
-    border-color: var(--primary-color);
-    box-shadow: 0 0 0 4px rgba(67, 97, 238, 0.15);
-}
-
-.btn {
-    border-radius: 12px;
-    padding: 10px 24px;
-    font-weight: 600;
-}
-
-.btn-primary {
-    background: var(--primary-gradient);
-    border: none;
-    box-shadow: 0 4px 15px rgba(67, 97, 238, 0.3);
-}
-
-.btn-primary:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 8px 20px rgba(67, 97, 238, 0.4);
-}
-
-.modal-content {
-    border-radius: 20px;
-    border: none;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.2);
-}
-
-.d-none { display: none !important; }
-.animate-fade-up { animation: fadeInUp 0.6s ease forwards; }
-@keyframes fadeInUp { from { opacity: 0; transform: translate3d(0, 30px, 0); } to { opacity: 1; transform: translate3d(0, 0, 0); } }
-
-.user-info-text {
-    max-width: 300px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    display: inline-block;
-    vertical-align: middle;
-}
-
 /* 維護模式遮罩 */
 #maintenanceOverlay {
     position: fixed; top: 0; left: 0; width: 100%; height: 100%;
@@ -147,3 +25,35 @@ body {
 @keyframes bow { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(10px) rotate(-5deg); } }
 .dev-backdoor { position: absolute; bottom: 20px; right: 20px; opacity: 0.1; cursor: pointer; font-size: 1.5rem; }
 .dev-backdoor:hover { opacity: 1; }
+
+/* 極簡登入轉場 */
+#loginTransition {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background-color: #ffffff; z-index: 10000;
+    display: flex; flex-direction: column; justify-content: center; align-items: center;
+    opacity: 0; pointer-events: none; transition: opacity 0.4s ease-in-out; 
+}
+#loginTransition.active { opacity: 1; pointer-events: all; }
+
+.simple-spinner {
+    width: 40px; height: 40px; border: 3px solid #f3f3f3;
+    border-top: 3px solid var(--primary-color); border-radius: 50%;
+    animation: spin 0.8s linear infinite; margin-bottom: 15px;
+}
+@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+.transition-text { font-size: 1.1rem; color: #555; font-weight: 500; letter-spacing: 1px; }
+
+/* UI 元件樣式 */
+.navbar { background: rgba(67, 97, 238, 0.95) !important; backdrop-filter: blur(10px); box-shadow: 0 4px 15px rgba(67, 97, 238, 0.1); padding: 0.8rem 0; }
+.card { border: none; border-radius: 20px; background: var(--glass-bg); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05); backdrop-filter: blur(10px); transition: transform 0.3s; }
+#studentStats .card:hover { transform: translateY(-5px); box-shadow: 0 15px 35px rgba(67, 97, 238, 0.15); }
+.form-control, .form-select { border-radius: 12px; padding: 12px 15px; border: 1px solid #e0e0e0; background-color: #fff; }
+.form-control:focus, .form-select:focus { border-color: var(--primary-color); box-shadow: 0 0 0 4px rgba(67, 97, 238, 0.15); }
+.btn { border-radius: 12px; padding: 10px 24px; font-weight: 600; }
+.btn-primary { background: var(--primary-gradient); border: none; box-shadow: 0 4px 15px rgba(67, 97, 238, 0.3); }
+.btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(67, 97, 238, 0.4); }
+.modal-content { border-radius: 20px; border: none; box-shadow: 0 20px 60px rgba(0,0,0,0.2); }
+.d-none { display: none !important; }
+.animate-fade-up { animation: fadeInUp 0.6s ease forwards; }
+@keyframes fadeInUp { from { opacity: 0; transform: translate3d(0, 30px, 0); } to { opacity: 1; transform: translate3d(0, 0, 0); } }
+.user-info-text { max-width: 300px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: inline-block; vertical-align: middle; }

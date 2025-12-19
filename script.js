@@ -1,5 +1,5 @@
 // --------------------------------------------------------
-// FitTrack 最終版邏輯 (v22.0 - 穩定性與即時更新版)
+// FitTrack 最終版邏輯 (v23.0 - 完整版)
 // --------------------------------------------------------
 
 const SUPABASE_URL = 'https://szhdnodigzybxwnftdgm.supabase.co';
@@ -14,12 +14,12 @@ let currentUserRole = 'student';
 let currentUserId = null;
 let currentUserStudentId = null;
 let systemSettings = { maintenance_mode: { login: false, student: false, teacher: false, quick: false } };
-let autoRefreshInterval = null; // [新增] 自動更新計時器
+let autoRefreshInterval = null;
 
 // ================= 1. 靜態資料與輔助 =================
 
 const taiwanCities = ["臺北市", "新北市", "桃園市", "臺中市", "臺南市", "高雄市", "基隆市", "新竹市", "嘉義市", "新竹縣", "苗栗縣", "彰化縣", "南投縣", "雲林縣", "嘉義縣", "屏東縣", "宜蘭縣", "花蓮縣", "臺東縣", "澎湖縣", "金門縣", "連江縣"];
-const partnerSchools = { "臺北市": ["臺北市萬芳高級中學"] }; // 必須與資料庫字串完全一致
+const partnerSchools = { "臺北市": ["臺北市萬芳高級中學"] };
 let selectedSchoolName = "";
 
 const bmiStandards = {
@@ -118,7 +118,7 @@ function toggleView(isLoggedIn) {
     } else {
         mainApp.classList.add('d-none'); authSection.classList.remove('d-none'); authSection.classList.add('d-flex');
         checkMaintenanceMode('login');
-        if (autoRefreshInterval) clearInterval(autoRefreshInterval); // 登出停止更新
+        if (autoRefreshInterval) clearInterval(autoRefreshInterval);
     }
 }
 
@@ -180,18 +180,11 @@ function selectSchool(school) {
     new bootstrap.Modal(document.getElementById('quickLoginModal')).show();
 }
 
-// 快速登入邏輯
 document.getElementById('quickLoginForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const className = document.getElementById('quickClass').value;
     const seatNumber = document.getElementById('quickSeat').value;
-    
-    // [修正] 確保查詢參數正確
-    const { data, error } = await supabase.from('students').select('*')
-        .eq('school_name', selectedSchoolName)
-        .eq('class_name', className)
-        .eq('seat_number', seatNumber)
-        .maybeSingle();
+    const { data, error } = await supabase.from('students').select('*').eq('school_name', selectedSchoolName).eq('class_name', className).eq('seat_number', seatNumber).maybeSingle();
 
     if (error) showAlert('錯誤', error.message, 'error');
     else if (data) {
@@ -201,7 +194,7 @@ document.getElementById('quickLoginForm').addEventListener('submit', async (e) =
             toggleView(true); updateUserDisplay(data); applyRoleUI('student'); initAppData();
         });
     } else {
-        showAlert('找不到資料', '請確認輸入正確，或學校名稱是否完全符合。', 'error');
+        showAlert('找不到資料', '請確認輸入正確。', 'error');
     }
 });
 
@@ -231,7 +224,7 @@ function applyRoleUI(role) {
     }
 }
 
-// ================= 3. 資料載入與自動更新 =================
+// ================= 3. 資料載入 =================
 
 async function loadDevices() {
     try {
@@ -248,13 +241,11 @@ async function initAppData() {
     if (currentUserRole === 'student') { await loadStudentProfile(); loadStudentData(); } 
     else { await loadStudentListForTeacher(); loadClassStats(); }
 
-    // [新增] 啟動自動更新 (每 10 秒)
     if (autoRefreshInterval) clearInterval(autoRefreshInterval);
     autoRefreshInterval = setInterval(() => {
         if (currentUserRole === 'student') loadStudentData();
         else if (currentUserRole === 'teacher') {
             loadClassStats();
-            // 如果老師正在選某個學生，也重新整理那個學生的資料
             const selectedStudent = document.getElementById('teacherStudentSelect').value;
             if(selectedStudent && !selectedStudent.includes('請選擇')) {
                 document.getElementById('teacherStudentSelect').dispatchEvent(new Event('change'));
@@ -306,38 +297,85 @@ async function loadStudentData() {
     adviceText.innerHTML = advice.join(' | ');
     renderTrendChart(records);
 
-    // [新增] 生成歷史紀錄表格
     const historyBody = document.getElementById('studentHistoryTableBody');
-    historyBody.innerHTML = '';
-    // 反轉陣列讓新的在上面
-    [...records].reverse().forEach(r => {
-        let typeName = r.code;
-        if(r.code === 'height') typeName = '身高';
-        else if(r.code === 'weight') typeName = '體重';
-        else if(r.code === 'run800') typeName = '800m 跑';
-        else if(r.code === 'heartrate') typeName = '心率';
-
-        const date = new Date(r.effective_datetime).toLocaleString();
-        historyBody.innerHTML += `
-            <tr>
-                <td>${typeName}</td>
-                <td class="fw-bold">${r.value}</td>
-                <td>${r.unit}</td>
-                <td class="text-muted small">${date}</td>
-            </tr>
-        `;
-    });
+    if (historyBody) {
+        historyBody.innerHTML = '';
+        [...records].reverse().forEach(r => {
+            let typeName = r.code;
+            if(r.code==='height') typeName='身高'; else if(r.code==='weight') typeName='體重'; else if(r.code==='run800') typeName='800m 跑'; else if(r.code==='heartrate') typeName='心率';
+            const date = new Date(r.effective_datetime).toLocaleString();
+            historyBody.innerHTML += `<tr><td>${typeName}</td><td class="fw-bold">${r.value}</td><td>${r.unit}</td><td class="text-muted small">${date}</td></tr>`;
+        });
+    }
 }
 
+// [優化] 漸層圖表與雙軸
 function renderTrendChart(records) {
     const ctx = document.getElementById('trendChart').getContext('2d');
     if (myChart) myChart.destroy();
+
     const dates = [...new Set(records.map(r => new Date(r.effective_datetime).toLocaleDateString()))];
-    const getData = (code) => records.filter(r => r.code === code).map(r => ({x: new Date(r.effective_datetime).toLocaleDateString(), y: r.value}));
+    const getData = (code) => {
+        // 簡單映射，實際應用可優化為依日期合併
+        return records.filter(r => r.code === code).map(r => ({x: new Date(r.effective_datetime).toLocaleDateString(), y: r.value}));
+    };
+
+    // 建立漸層
+    const gradientWeight = ctx.createLinearGradient(0, 0, 0, 400);
+    gradientWeight.addColorStop(0, 'rgba(13, 202, 240, 0.5)'); 
+    gradientWeight.addColorStop(1, 'rgba(13, 202, 240, 0.0)');
+
+    const gradientRun = ctx.createLinearGradient(0, 0, 0, 400);
+    gradientRun.addColorStop(0, 'rgba(25, 135, 84, 0.5)'); 
+    gradientRun.addColorStop(1, 'rgba(25, 135, 84, 0.0)');
+
+    const gradientHR = ctx.createLinearGradient(0, 0, 0, 400);
+    gradientHR.addColorStop(0, 'rgba(220, 53, 69, 0.5)'); 
+    gradientHR.addColorStop(1, 'rgba(220, 53, 69, 0.0)');
+
     myChart = new Chart(ctx, {
         type: 'line',
-        data: { labels: dates, datasets: [{ label: '800m', data: getData('run800'), borderColor: '#198754', tension: 0.3, yAxisID: 'y' }, { label: '心率', data: getData('heartrate'), borderColor: '#dc3545', tension: 0.3, yAxisID: 'y' }] },
-        options: { responsive: true, scales: { y: { position: 'left' } } }
+        data: {
+            labels: dates,
+            datasets: [
+                {
+                    label: '體重 (kg)',
+                    data: getData('weight'),
+                    borderColor: '#0dcaf0',
+                    backgroundColor: gradientWeight,
+                    fill: true,
+                    tension: 0.4,
+                    yAxisID: 'y'
+                },
+                {
+                    label: '800m (秒)',
+                    data: getData('run800'),
+                    borderColor: '#198754',
+                    backgroundColor: gradientRun,
+                    fill: true,
+                    tension: 0.4,
+                    yAxisID: 'y1'
+                },
+                {
+                    label: '心率 (bpm)',
+                    data: getData('heartrate'),
+                    borderColor: '#dc3545',
+                    backgroundColor: gradientHR,
+                    fill: true,
+                    tension: 0.4,
+                    yAxisID: 'y1'
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            interaction: { mode: 'index', intersect: false },
+            scales: {
+                x: { grid: { display: false } },
+                y: { type: 'linear', display: true, position: 'left', title: {display:true, text:'體重'} },
+                y1: { type: 'linear', display: true, position: 'right', grid: { drawOnChartArea: false }, title: {display:true, text:'秒數/bpm'} },
+            }
+        }
     });
 }
 
@@ -346,16 +384,14 @@ function renderTrendChart(records) {
 document.addEventListener('DOMContentLoaded', async () => {
     await loadSystemSettings();
     const { data: { session } } = await supabase.auth.getSession();
-    if (session) handleLoginSuccess(session, true); // true = skip animation
+    if (session) handleLoginSuccess(session, true); 
     else toggleView(false);
 });
 
 supabase.auth.onAuthStateChange(async (event, session) => {
-    if (event === 'SIGNED_IN' && session) {
-        handleLoginSuccess(session, false);
-    } else if (event === 'SIGNED_OUT') {
-        currentUserId = null;
-        currentUserRole = null;
+    if (event === 'SIGNED_IN' && session) handleLoginSuccess(session, false);
+    else if (event === 'SIGNED_OUT') {
+        currentUserId = null; currentUserRole = null;
         if (autoRefreshInterval) clearInterval(autoRefreshInterval);
         toggleView(false);
     }
@@ -436,42 +472,20 @@ async function logout() {
     finally { localStorage.clear(); window.location.reload(); } 
 }
 
-// [修復] 老師端表單提交 (防止重整)
 document.getElementById('recordForm').addEventListener('submit', async (e) => {
-    e.preventDefault(); // 1. 阻止預設行為 (避免重整)
-    
+    e.preventDefault();
     const sid = document.getElementById('teacherStudentSelect').value;
     if (!sid || sid.includes('請選擇')) return showAlert('錯誤', '請選擇一位學生', 'error');
-
     const devId = document.getElementById('deviceSelect').value;
     const type = document.getElementById('recordType').value;
     const val = document.getElementById('recordValue').value;
-    
-    let unit = 'unknown';
-    if (type === 'height') unit = 'cm';
-    if (type === 'weight') unit = 'kg';
-    if (type === 'run800') unit = 'sec';
-    if (type === 'heartrate') unit = 'bpm';
-
-    // 2. 寫入資料庫
-    const { error } = await supabase.from('health_records').insert([{
-        student_id: sid,
-        device_id: devId || null,
-        code: type,
-        value: val,
-        unit: unit,
-        effective_datetime: new Date().toISOString()
-    }]);
-
-    if (error) {
-        showAlert('寫入失敗', error.message, 'error');
-    } else {
-        showAlert('成功', '數據已上傳！', 'success');
-        document.getElementById('recordValue').value = ''; // 只清空數值
-        
-        // 3. 自動刷新統計圖表與右側學生資料
+    let unit = 'unknown'; if (type === 'height') unit = 'cm'; if (type === 'weight') unit = 'kg'; if (type === 'run800') unit = 'sec'; if (type === 'heartrate') unit = 'bpm';
+    const { error } = await supabase.from('health_records').insert([{ student_id: sid, device_id: devId || null, code: type, value: val, unit: unit, effective_datetime: new Date().toISOString() }]);
+    if (error) { showAlert('寫入失敗', error.message, 'error'); } 
+    else { 
+        showAlert('成功', '數據已上傳！', 'success'); 
+        document.getElementById('recordValue').value = ''; 
         loadClassStats();
-        // 觸發 change 事件以刷新右側學生歷史
         document.getElementById('teacherStudentSelect').dispatchEvent(new Event('change'));
     }
 });
@@ -480,36 +494,18 @@ async function loadStudentListForTeacher() {
     const { data } = await supabase.from('students').select('id, name, student_id').order('student_id');
     const s2 = document.getElementById('teacherStudentSelect'); s2.innerHTML = '<option selected disabled>請選擇學生...</option>';
     if (data) { data.forEach(s => s2.innerHTML += `<option value="${s.id}" data-sid="${s.student_id}">${s.student_id} ${s.name}</option>`); }
-    
     s2.addEventListener('change', async (e) => {
         const studentId = e.target.value;
         const { data: student } = await supabase.from('students').select('*').eq('id', studentId).single();
         const { data: history } = await supabase.from('health_records').select('*').eq('student_id', studentId).order('effective_datetime', {ascending: false}).limit(3);
-        
-        document.getElementById('teacherStudentInfo').classList.add('d-none');
-        document.getElementById('teacherStudentDetail').classList.remove('d-none');
-        
-        if (student) {
-            document.getElementById('infoName').textContent = student.name;
-            document.getElementById('infoSchool').textContent = student.school_name || '';
-            document.getElementById('infoClass').textContent = student.class_name;
-            document.getElementById('infoSeat').textContent = student.seat_number;
-        }
-        
-        const list = document.getElementById('infoHistoryList');
-        list.innerHTML = '';
-        if (history && history.length) {
-            history.forEach(r => {
-                const date = new Date(r.effective_datetime).toLocaleDateString();
-                let type = r.code;
-                if(type==='run800') type='800m'; else if(type==='height') type='身高'; else if(type==='weight') type='體重'; else if(type==='heartrate') type='心率';
-                list.innerHTML += `<li class="list-group-item d-flex justify-content-between align-items-center">${type} <span class="badge bg-light text-dark">${r.value} ${r.unit}</span> <small class="text-muted">${date}</small></li>`;
-            });
-        } else { list.innerHTML = '<li class="list-group-item text-muted">無歷史資料</li>'; }
+        document.getElementById('teacherStudentInfo').classList.add('d-none'); document.getElementById('teacherStudentDetail').classList.remove('d-none');
+        if (student) { document.getElementById('infoName').textContent = student.name; document.getElementById('infoSchool').textContent = student.school_name || ''; document.getElementById('infoClass').textContent = student.class_name; document.getElementById('infoSeat').textContent = student.seat_number; }
+        const list = document.getElementById('infoHistoryList'); list.innerHTML = '';
+        if (history && history.length) { history.forEach(r => { const date = new Date(r.effective_datetime).toLocaleDateString(); let type = r.code; if(type==='run800') type='800m'; else if(type==='height') type='身高'; else if(type==='weight') type='體重'; else if(type==='heartrate') type='心率'; list.innerHTML += `<li class="list-group-item d-flex justify-content-between align-items-center">${type} <span class="badge bg-light text-dark">${r.value} ${r.unit}</span> <small class="text-muted">${date}</small></li>`; }); } else { list.innerHTML = '<li class="list-group-item text-muted">無歷史資料</li>'; }
     });
 }
 
-// ... (省略重複輔助函式: loadClassStats, profileForm, devAdmin, export/import) ...
+// 輔助函式 (掃描、檔案處理)
 async function loadClassStats() { const { data: records } = await supabase.from('health_records').select('*, students(name)'); if (!records || !records.length) return; const avg = (code) => { const v = records.filter(r => r.code === code).map(r => Number(r.value)); return v.length ? (v.reduce((a,b)=>a+b,0)/v.length).toFixed(1) : '--'; }; document.getElementById('avgRun').textContent = avg('run800'); document.getElementById('avgHR').textContent = avg('heartrate'); document.getElementById('avgBMI').textContent = '21.5'; const runs = records.filter(r => r.code === 'run800').map(r => Number(r.value)); const buckets = [0,0,0,0]; runs.forEach(v => { if (v < 200) buckets[0]++; else if (v < 250) buckets[1]++; else if (v < 300) buckets[2]++; else buckets[3]++; }); const ctx = document.getElementById('classHistogram').getContext('2d'); if (classChart) classChart.destroy(); classChart = new Chart(ctx, { type: 'bar', data: { labels: ['<200', '200-250', '250-300', '>300'], datasets: [{ label: '人數', data: buckets, backgroundColor: '#0d6efd' }] } }); }
 document.getElementById('profileForm').addEventListener('submit', async (e) => { e.preventDefault(); const name = document.getElementById('profileName').value; const school = document.getElementById('profileSchool').value; const class_n = document.getElementById('profileClass').value; const seat = document.getElementById('profileSeat').value; const age = document.getElementById('profileAge').value; const height = document.getElementById('profileHeight').value; const weight = document.getElementById('profileWeight').value; const { error } = await supabase.from('students').update({ name, school_name: school, class_name: class_n, seat_number: seat ? Number(seat) : null, age: age ? Number(age) : null }).eq('id', currentUserId); if (error) showAlert('錯誤', '儲存失敗', 'error'); else { const records = []; const now = new Date().toISOString(); if(height) records.push({ student_id: currentUserId, code: 'height', value: height, unit: 'cm', effective_datetime: now }); if(weight) records.push({ student_id: currentUserId, code: 'weight', value: weight, unit: 'kg', effective_datetime: now }); if(records.length > 0) await supabase.from('health_records').insert(records); showAlert('成功', '資料已更新', 'success'); loadStudentData(); loadStudentProfile(); } });
 async function openDevAdmin() { const pwd = prompt("密碼："); if (pwd === "15110") { document.getElementById('maintenanceOverlay').classList.add('d-none'); new bootstrap.Modal(document.getElementById('devAdminModal')).show(); loadDevUserList(); const s = systemSettings.maintenance_mode || {}; document.getElementById('maintLogin').checked = s.login; document.getElementById('maintStudent').checked = s.student; document.getElementById('maintTeacher').checked = s.teacher; document.getElementById('maintQuick').checked = s.quick; } else if (pwd !== null) showAlert('錯誤', '密碼錯誤', 'error'); }
