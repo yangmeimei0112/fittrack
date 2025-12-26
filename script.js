@@ -1,23 +1,124 @@
 // --------------------------------------------------------
-// FitTrack 最終版邏輯 (v23.0 - 完整版) - 已修復命名衝突
+// FitTrack 最終版邏輯 (v25.1 - FHIR 整合版)
 // --------------------------------------------------------
 
 const SUPABASE_URL = 'https://szhdnodigzybxwnftdgm.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN6aGRub2RpZ3p5Ynh3bmZ0ZGdtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ3NzM0NjYsImV4cCI6MjA4MDM0OTQ2Nn0.5evNyYmufJ9KaWYw4QsD4btgrQDMkIiYNbUhEaf52NE';
 
-// [修正] 將變數名稱改為 supabaseClient，避免與 CDN 引入的 window.supabase 衝突
+// [新增] FHIR Server 設定
+const FHIR_SERVER_URL = 'https://hapi.fhir.org/baseR4';
+
+// 初始化 Supabase
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
+// 全域變數
 let myChart = null;       
 let classChart = null;    
 let html5QrcodeScanner = null;
 let currentUserRole = 'student'; 
 let currentUserId = null;
 let currentUserStudentId = null;
-let systemSettings = { maintenance_mode: { login: false, student: false, teacher: false, quick: false } };
+let systemSettings = { 
+    maintenance_mode: { login: false, student: false, teacher: false, quick: false },
+    marquee_settings: { text: "", enabled: false }
+};
 let autoRefreshInterval = null;
 
-// ================= 1. 靜態資料與輔助 =================
+// ================= 1. FHIR 整合邏輯 (核心新增) =================
+
+// 1. 上傳/同步病人資料 (Patient)
+async function syncPatientToFHIR(studentData) {
+    console.log("正在同步病人資料到 FHIR...");
+    
+    // 檢查該學號是否已經存在於 FHIR Server
+    const searchUrl = `${FHIR_SERVER_URL}/Patient?identifier=${studentData.student_id}`;
+    
+    try {
+        const resp = await fetch(searchUrl);
+        const data = await resp.json();
+        
+        if (data.entry && data.entry.length > 0) {
+            console.log("FHIR: 病人已存在，ID:", data.entry[0].resource.id);
+            return data.entry[0].resource.id; // 回傳現有的 FHIR ID
+        } else {
+            // 若不存在，建立新病人
+            const newPatient = {
+                resourceType: "Patient",
+                identifier: [{ 
+                    system: "https://github.com/yangmeimei0112/fittrack", 
+                    value: studentData.student_id 
+                }],
+                name: [{ text: studentData.name }],
+                gender: studentData.gender === 'male' ? 'male' : 'female',
+                active: true
+            };
+
+            const createResp = await fetch(`${FHIR_SERVER_URL}/Patient`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(newPatient)
+            });
+            const createData = await createResp.json();
+            console.log("FHIR: 新病人建立成功，ID:", createData.id);
+            return createData.id;
+        }
+    } catch (err) {
+        console.error("FHIR Sync Error:", err);
+        return null;
+    }
+}
+
+// 2. 上傳生理量測資料 (Observation)
+async function syncObservationToFHIR(dbStudentId, code, value, unit, date) {
+    console.log("正在上傳數據到 FHIR...", code, value);
+
+    // 步驟 A: 先從 Supabase 取得學生詳細資料 (為了拿到學號)
+    const { data: student } = await supabaseClient.from('students').select('*').eq('id', dbStudentId).single();
+    if (!student) return;
+
+    // 步驟 B: 取得或建立 FHIR Patient ID
+    const fhirPatientId = await syncPatientToFHIR(student);
+    if (!fhirPatientId) return;
+
+    // 步驟 C: 對應 LOINC 代碼 (國際標準)
+    let loincCode = "unknown";
+    let display = "unknown";
+    
+    if (code === 'height') { loincCode = '8302-2'; display = 'Body height'; }
+    else if (code === 'weight') { loincCode = '29463-7'; display = 'Body weight'; }
+    else if (code === 'heartrate') { loincCode = '8867-4'; display = 'Heart rate'; }
+    else if (code === 'run800') { loincCode = 'X-RUN800'; display = '800m Run'; } // 自定義代碼
+
+    // 步驟 D: 建立 Observation 資源
+    const observation = {
+        resourceType: "Observation",
+        status: "final",
+        code: {
+            coding: [{ system: "http://loinc.org", code: loincCode, display: display }]
+        },
+        subject: { reference: `Patient/${fhirPatientId}` },
+        valueQuantity: {
+            value: Number(value),
+            unit: unit,
+            system: "http://unitsofmeasure.org"
+        },
+        effectiveDateTime: date
+    };
+
+    // 步驟 E: 發送請求
+    try {
+        await fetch(`${FHIR_SERVER_URL}/Observation`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(observation)
+        });
+        console.log("FHIR: 數據上傳成功！");
+    } catch (err) {
+        console.error("FHIR Observation Error:", err);
+    }
+}
+
+// ================= 2. 靜態資料與輔助 =================
 
 const taiwanCities = ["臺北市", "新北市", "桃園市", "臺中市", "臺南市", "高雄市", "基隆市", "新竹市", "嘉義市", "新竹縣", "苗栗縣", "彰化縣", "南投縣", "雲林縣", "嘉義縣", "屏東縣", "宜蘭縣", "花蓮縣", "臺東縣", "澎湖縣", "金門縣", "連江縣"];
 const partnerSchools = { "臺北市": ["臺北市萬芳高級中學"] };
@@ -47,9 +148,12 @@ function showMyQRCode() {
 }
 
 function showAlert(title, message, type = 'info') {
-    document.getElementById('msgModalTitle').textContent = title;
-    document.getElementById('msgModalContent').textContent = message;
+    const titleEl = document.getElementById('msgModalTitle');
+    const contentEl = document.getElementById('msgModalContent');
     const iconDiv = document.getElementById('msgModalIcon');
+    if (!titleEl || !contentEl) return alert(`${title}: ${message}`);
+    titleEl.textContent = title;
+    contentEl.textContent = message;
     if(type === 'success') iconDiv.innerHTML = '<i class="bi bi-check-circle-fill text-success"></i>';
     else if(type === 'error') iconDiv.innerHTML = '<i class="bi bi-x-circle-fill text-danger"></i>';
     else iconDiv.innerHTML = '<i class="bi bi-info-circle-fill text-primary"></i>';
@@ -81,7 +185,7 @@ function updateUserDisplay(data) {
     }
 }
 
-// ================= 2. 維運與權限 =================
+// ================= 3. 維運與跑馬燈管理 =================
 
 function checkMaintenanceMode(scope) {
     const overlay = document.getElementById('maintenanceOverlay');
@@ -90,26 +194,81 @@ function checkMaintenanceMode(scope) {
     else overlay.classList.add('d-none');
 }
 
-async function loadSystemSettings() {
-    // [修正] 使用 supabaseClient
-    const { data } = await supabaseClient.from('system_settings').select('value').eq('key', 'maintenance_mode').maybeSingle();
-    if (data) systemSettings.maintenance_mode = data.value;
+function checkMarqueeStatus() {
+    const marquee = document.getElementById('topMarquee');
+    const marqueeTrack = document.getElementById('marqueeTrack');
+    const settings = systemSettings.marquee_settings;
+
+    if (settings && settings.enabled === true && settings.text && settings.text.trim() !== "") {
+        marquee.classList.remove('d-none');
+        document.body.classList.add('has-marquee'); 
+        
+        const text = settings.text + "　✦　"; 
+        let contentHtml = "";
+        for(let i=0; i<8; i++) {
+            contentHtml += `<span class="marquee-item">${text}</span>`;
+        }
+        
+        marqueeTrack.innerHTML = `
+            <div class="marquee-block">${contentHtml}</div>
+            <div class="marquee-block">${contentHtml}</div>
+        `;
+        
+    } else {
+        marquee.classList.add('d-none');
+        document.body.classList.remove('has-marquee');
+        marqueeTrack.innerHTML = '';
+    }
 }
 
-async function saveSystemSettings() {
-    const newSettings = {
+async function loadSystemSettings() {
+    const { data } = await supabaseClient.from('system_settings').select('*');
+    if (data) {
+        data.forEach(row => {
+            if (row.key === 'maintenance_mode') systemSettings.maintenance_mode = row.value;
+            if (row.key === 'marquee_settings') systemSettings.marquee_settings = row.value;
+        });
+    }
+    checkMarqueeStatus();
+}
+
+async function saveSystemSettings(type = 'all') {
+    const maintSettings = {
         login: document.getElementById('maintLogin').checked,
         student: document.getElementById('maintStudent').checked,
         teacher: document.getElementById('maintTeacher').checked,
         quick: document.getElementById('maintQuick').checked
     };
-    // [修正] 使用 supabaseClient
-    const { error } = await supabaseClient.from('system_settings').upsert({ key: 'maintenance_mode', value: newSettings });
-    if(error) showAlert('錯誤', error.message, 'error');
-    else {
-        showAlert('成功', '設定已更新', 'success');
-        systemSettings.maintenance_mode = newSettings;
+    
+    const marqueeSettings = {
+        enabled: document.getElementById('marqueeEnabled').checked,
+        text: document.getElementById('marqueeContent').value
+    };
+
+    const updates = [
+        { key: 'maintenance_mode', value: maintSettings },
+        { key: 'marquee_settings', value: marqueeSettings }
+    ];
+
+    const { error } = await supabaseClient.from('system_settings').upsert(updates);
+
+    if(error) {
+        showAlert('錯誤', error.message, 'error');
+    } else {
+        systemSettings.maintenance_mode = maintSettings;
+        systemSettings.marquee_settings = marqueeSettings;
+        checkMarqueeStatus();
         if(!currentUserId) checkMaintenanceMode('login');
+
+        let msgEl = null;
+        if(type === 'marquee') msgEl = document.getElementById('adminSaveMsg_marquee');
+        else if(type === 'maint') msgEl = document.getElementById('adminSaveMsg_maint');
+        else msgEl = document.getElementById('adminSaveMsg_marquee');
+
+        if(msgEl) {
+            msgEl.textContent = "✅ 設定已儲存 (跑馬燈更新)";
+            setTimeout(() => { msgEl.textContent = ""; }, 2000); 
+        }
     }
 }
 
@@ -187,7 +346,6 @@ document.getElementById('quickLoginForm').addEventListener('submit', async (e) =
     e.preventDefault();
     const className = document.getElementById('quickClass').value;
     const seatNumber = document.getElementById('quickSeat').value;
-    // [修正] 使用 supabaseClient
     const { data, error } = await supabaseClient.from('students').select('*').eq('school_name', selectedSchoolName).eq('class_name', className).eq('seat_number', seatNumber).maybeSingle();
 
     if (error) showAlert('錯誤', error.message, 'error');
@@ -203,7 +361,6 @@ document.getElementById('quickLoginForm').addEventListener('submit', async (e) =
 });
 
 async function checkRole(userId) {
-    // [修正] 使用 supabaseClient
     const { data } = await supabaseClient.from('teachers_list').select('id, is_approved').eq('id', userId).maybeSingle();
     if (data) return data.is_approved ? 'teacher' : 'pending_teacher';
     return 'student';
@@ -229,11 +386,10 @@ function applyRoleUI(role) {
     }
 }
 
-// ================= 3. 資料載入 =================
+// ================= 4. 資料載入 =================
 
 async function loadDevices() {
     try {
-        // [修正] 使用 supabaseClient
         const { data } = await supabaseClient.from('devices').select('*');
         const sel = document.getElementById('deviceSelect');
         sel.innerHTML = '';
@@ -261,7 +417,6 @@ async function initAppData() {
 }
 
 async function loadStudentProfile() {
-    // [修正] 使用 supabaseClient
     const { data: student } = await supabaseClient.from('students').select('*').eq('id', currentUserId).single();
     if (student) {
         updateUserDisplay(student); 
@@ -273,7 +428,6 @@ async function loadStudentProfile() {
         document.getElementById('profileClass').value = student.class_name || '';
         document.getElementById('profileSeat').value = student.seat_number || '';
         document.getElementById('profileAge').value = student.age || '';
-        // [修正] 使用 supabaseClient
         const { data: records } = await supabaseClient.from('health_records').select('*').eq('student_id', currentUserId).order('effective_datetime', { ascending: false });
         if(records && records.length) {
             const h = records.find(r => r.code === 'height'); const w = records.find(r => r.code === 'weight');
@@ -285,7 +439,6 @@ async function loadStudentProfile() {
 
 async function loadStudentData() {
     document.getElementById('qrDisplayArea').classList.add('d-none'); 
-    // [修正] 使用 supabaseClient
     const { data: student } = await supabaseClient.from('students').select('age, gender').eq('id', currentUserId).single();
     const { data: records } = await supabaseClient.from('health_records').select('*').eq('student_id', currentUserId).order('effective_datetime', { ascending: true });
     
@@ -318,18 +471,15 @@ async function loadStudentData() {
     }
 }
 
-// [優化] 漸層圖表與雙軸
 function renderTrendChart(records) {
     const ctx = document.getElementById('trendChart').getContext('2d');
     if (myChart) myChart.destroy();
 
     const dates = [...new Set(records.map(r => new Date(r.effective_datetime).toLocaleDateString()))];
     const getData = (code) => {
-        // 簡單映射，實際應用可優化為依日期合併
         return records.filter(r => r.code === code).map(r => ({x: new Date(r.effective_datetime).toLocaleDateString(), y: r.value}));
     };
 
-    // 建立漸層
     const gradientWeight = ctx.createLinearGradient(0, 0, 0, 400);
     gradientWeight.addColorStop(0, 'rgba(13, 202, 240, 0.5)'); 
     gradientWeight.addColorStop(1, 'rgba(13, 202, 240, 0.0)');
@@ -388,17 +538,15 @@ function renderTrendChart(records) {
     });
 }
 
-// ================= 4. AUTH =================
+// ================= 5. AUTH =================
 
 document.addEventListener('DOMContentLoaded', async () => {
     await loadSystemSettings();
-    // [修正] 使用 supabaseClient
     const { data: { session } } = await supabaseClient.auth.getSession();
     if (session) handleLoginSuccess(session, true); 
     else toggleView(false);
 });
 
-// [修正] 使用 supabaseClient
 supabaseClient.auth.onAuthStateChange(async (event, session) => {
     if (event === 'SIGNED_IN' && session) handleLoginSuccess(session, false);
     else if (event === 'SIGNED_OUT') {
@@ -411,7 +559,6 @@ supabaseClient.auth.onAuthStateChange(async (event, session) => {
 async function handleLoginSuccess(session, skipAnim = false) {
     currentUserId = session.user.id;
     currentUserRole = await checkRole(currentUserId);
-    // [修正] 使用 supabaseClient
     if (currentUserRole === 'pending_teacher') { showAlert('審核中', '您的老師帳號尚未通過審核。', 'info'); await supabaseClient.auth.signOut(); return; }
 
     const loadUI = () => {
@@ -427,10 +574,8 @@ async function handleLoginSuccess(session, skipAnim = false) {
     } else {
         let name = "使用者";
         if (currentUserRole === 'student') {
-            // [修正] 使用 supabaseClient
             const {data} = await supabaseClient.from('students').select('name').eq('id', currentUserId).maybeSingle(); if(data) name = data.name;
         } else {
-            // [修正] 使用 supabaseClient
             const {data} = await supabaseClient.from('teachers_list').select('name').eq('id', currentUserId).maybeSingle(); if(data) name = data.name;
         }
         playLoginAnimation(name, loadUI);
@@ -441,7 +586,6 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const email = document.getElementById('loginEmail').value;
     const password = document.getElementById('loginPassword').value;
-    // [修正] 使用 supabaseClient
     const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
     if (error) showAlert('登入失敗', error.message, 'error'); else document.getElementById('loginForm').reset();
 });
@@ -453,17 +597,14 @@ document.getElementById('signupForm').addEventListener('submit', async (e) => {
     const password = document.getElementById('regPassword').value;
     const name = document.getElementById('regName').value;
     if (password.length < 6) return showAlert('錯誤', '密碼需 6 碼以上', 'error');
-    // [修正] 使用 supabaseClient
     const { data, error } = await supabaseClient.auth.signUp({ email, password });
     if (error) { if (error.status === 422) showAlert('已註冊', '此 Email 已註冊，請直接登入。', 'info'); else showAlert('錯誤', error.message, 'error'); return; }
     if (data.user) {
         if (role === 'teacher') {
-            // [修正] 使用 supabaseClient
             const { error: dbError } = await supabaseClient.from('teachers_list').insert([{ id: data.user.id, name: name, email: email, is_approved: false }]);
             if (dbError) showAlert('錯誤', dbError.message, 'error');
             else { showAlert('申請已送出', '請等待管理員審核。', 'success'); await supabaseClient.auth.signOut(); showLogin(); }
         } else {
-            // [修正] 使用 supabaseClient
             const { error: dbError } = await supabaseClient.from('students').insert([{
                 id: data.user.id,
                 student_id: document.getElementById('regStudentId').value,
@@ -477,8 +618,25 @@ document.getElementById('signupForm').addEventListener('submit', async (e) => {
             }]);
             if (dbError) { if(dbError.message.includes("duplicate key")) showAlert('重複', '帳號已存在', 'info'); else showAlert('錯誤', dbError.message, 'error'); } else {
                 const h = document.getElementById('regHeight').value; const w = document.getElementById('regWeight').value;
-                // [修正] 使用 supabaseClient
-                if (h || w) { const rec = []; const now = new Date().toISOString(); if(h) rec.push({ student_id: data.user.id, code: 'height', value: h, unit: 'cm', effective_datetime: now }); if(w) rec.push({ student_id: data.user.id, code: 'weight', value: w, unit: 'kg', effective_datetime: now }); await supabaseClient.from('health_records').insert(rec); }
+                if (h || w) { 
+                    const rec = []; 
+                    const now = new Date().toISOString(); 
+                    if(h) rec.push({ student_id: data.user.id, code: 'height', value: h, unit: 'cm', effective_datetime: now }); 
+                    if(w) rec.push({ student_id: data.user.id, code: 'weight', value: w, unit: 'kg', effective_datetime: now }); 
+                    await supabaseClient.from('health_records').insert(rec); 
+                    
+                    // [FHIR] 註冊時同步建立 Patient
+                    const studentData = {
+                        student_id: document.getElementById('regStudentId').value,
+                        name: name,
+                        gender: document.getElementById('regGender').value
+                    };
+                    await syncPatientToFHIR(studentData);
+                    
+                    // [FHIR] 若有初始身高體重，也同步上傳
+                    if(h) await syncObservationToFHIR(data.user.id, 'height', h, 'cm', now);
+                    if(w) await syncObservationToFHIR(data.user.id, 'weight', w, 'kg', now);
+                }
                 showAlert('成功', '註冊成功！', 'success');
             }
         }
@@ -486,7 +644,7 @@ document.getElementById('signupForm').addEventListener('submit', async (e) => {
 });
 
 async function logout() { 
-    try { await supabaseClient.auth.signOut(); } // [修正] 使用 supabaseClient
+    try { await supabaseClient.auth.signOut(); } 
     catch (e) {} 
     finally { localStorage.clear(); window.location.reload(); } 
 }
@@ -499,10 +657,15 @@ document.getElementById('recordForm').addEventListener('submit', async (e) => {
     const type = document.getElementById('recordType').value;
     const val = document.getElementById('recordValue').value;
     let unit = 'unknown'; if (type === 'height') unit = 'cm'; if (type === 'weight') unit = 'kg'; if (type === 'run800') unit = 'sec'; if (type === 'heartrate') unit = 'bpm';
-    // [修正] 使用 supabaseClient
-    const { error } = await supabaseClient.from('health_records').insert([{ student_id: sid, device_id: devId || null, code: type, value: val, unit: unit, effective_datetime: new Date().toISOString() }]);
+    
+    const now = new Date().toISOString();
+    const { error } = await supabaseClient.from('health_records').insert([{ student_id: sid, device_id: devId || null, code: type, value: val, unit: unit, effective_datetime: now }]);
+    
     if (error) { showAlert('寫入失敗', error.message, 'error'); } 
     else { 
+        // [FHIR] 同步上傳到 FHIR
+        await syncObservationToFHIR(sid, type, val, unit, now);
+        
         showAlert('成功', '數據已上傳！', 'success'); 
         document.getElementById('recordValue').value = ''; 
         loadClassStats();
@@ -511,13 +674,11 @@ document.getElementById('recordForm').addEventListener('submit', async (e) => {
 });
 
 async function loadStudentListForTeacher() {
-    // [修正] 使用 supabaseClient
     const { data } = await supabaseClient.from('students').select('id, name, student_id').order('student_id');
     const s2 = document.getElementById('teacherStudentSelect'); s2.innerHTML = '<option selected disabled>請選擇學生...</option>';
     if (data) { data.forEach(s => s2.innerHTML += `<option value="${s.id}" data-sid="${s.student_id}">${s.student_id} ${s.name}</option>`); }
     s2.addEventListener('change', async (e) => {
         const studentId = e.target.value;
-        // [修正] 使用 supabaseClient
         const { data: student } = await supabaseClient.from('students').select('*').eq('id', studentId).single();
         const { data: history } = await supabaseClient.from('health_records').select('*').eq('student_id', studentId).order('effective_datetime', {ascending: false}).limit(3);
         document.getElementById('teacherStudentInfo').classList.add('d-none'); document.getElementById('teacherStudentDetail').classList.remove('d-none');
@@ -528,10 +689,39 @@ async function loadStudentListForTeacher() {
 }
 
 // 輔助函式 (掃描、檔案處理)
-// [修正] 使用 supabaseClient
 async function loadClassStats() { const { data: records } = await supabaseClient.from('health_records').select('*, students(name)'); if (!records || !records.length) return; const avg = (code) => { const v = records.filter(r => r.code === code).map(r => Number(r.value)); return v.length ? (v.reduce((a,b)=>a+b,0)/v.length).toFixed(1) : '--'; }; document.getElementById('avgRun').textContent = avg('run800'); document.getElementById('avgHR').textContent = avg('heartrate'); document.getElementById('avgBMI').textContent = '21.5'; const runs = records.filter(r => r.code === 'run800').map(r => Number(r.value)); const buckets = [0,0,0,0]; runs.forEach(v => { if (v < 200) buckets[0]++; else if (v < 250) buckets[1]++; else if (v < 300) buckets[2]++; else buckets[3]++; }); const ctx = document.getElementById('classHistogram').getContext('2d'); if (classChart) classChart.destroy(); classChart = new Chart(ctx, { type: 'bar', data: { labels: ['<200', '200-250', '250-300', '>300'], datasets: [{ label: '人數', data: buckets, backgroundColor: '#0d6efd' }] } }); }
-document.getElementById('profileForm').addEventListener('submit', async (e) => { e.preventDefault(); const name = document.getElementById('profileName').value; const school = document.getElementById('profileSchool').value; const class_n = document.getElementById('profileClass').value; const seat = document.getElementById('profileSeat').value; const age = document.getElementById('profileAge').value; const height = document.getElementById('profileHeight').value; const weight = document.getElementById('profileWeight').value; const { error } = await supabaseClient.from('students').update({ name, school_name: school, class_name: class_n, seat_number: seat ? Number(seat) : null, age: age ? Number(age) : null }).eq('id', currentUserId); if (error) showAlert('錯誤', '儲存失敗', 'error'); else { const records = []; const now = new Date().toISOString(); if(height) records.push({ student_id: currentUserId, code: 'height', value: height, unit: 'cm', effective_datetime: now }); if(weight) records.push({ student_id: currentUserId, code: 'weight', value: weight, unit: 'kg', effective_datetime: now }); if(records.length > 0) await supabaseClient.from('health_records').insert(records); showAlert('成功', '資料已更新', 'success'); loadStudentData(); loadStudentProfile(); } });
-async function openDevAdmin() { const pwd = prompt("密碼："); if (pwd === "15110") { document.getElementById('maintenanceOverlay').classList.add('d-none'); new bootstrap.Modal(document.getElementById('devAdminModal')).show(); loadDevUserList(); const s = systemSettings.maintenance_mode || {}; document.getElementById('maintLogin').checked = s.login; document.getElementById('maintStudent').checked = s.student; document.getElementById('maintTeacher').checked = s.teacher; document.getElementById('maintQuick').checked = s.quick; } else if (pwd !== null) showAlert('錯誤', '密碼錯誤', 'error'); }
+document.getElementById('profileForm').addEventListener('submit', async (e) => { e.preventDefault(); const name = document.getElementById('profileName').value; const school = document.getElementById('profileSchool').value; const class_n = document.getElementById('profileClass').value; const seat = document.getElementById('profileSeat').value; const age = document.getElementById('profileAge').value; const height = document.getElementById('profileHeight').value; const weight = document.getElementById('profileWeight').value; const { error } = await supabaseClient.from('students').update({ name, school_name: school, class_name: class_n, seat_number: seat ? Number(seat) : null, age: age ? Number(age) : null }).eq('id', currentUserId); if (error) showAlert('錯誤', '儲存失敗', 'error'); else { 
+    const records = []; const now = new Date().toISOString(); 
+    if(height) { records.push({ student_id: currentUserId, code: 'height', value: height, unit: 'cm', effective_datetime: now }); }
+    if(weight) { records.push({ student_id: currentUserId, code: 'weight', value: weight, unit: 'kg', effective_datetime: now }); }
+    if(records.length > 0) {
+        await supabaseClient.from('health_records').insert(records);
+        // [FHIR] 更新個人資料時，同步身高體重
+        if(height) await syncObservationToFHIR(currentUserId, 'height', height, 'cm', now);
+        if(weight) await syncObservationToFHIR(currentUserId, 'weight', weight, 'kg', now);
+    }
+    showAlert('成功', '資料已更新', 'success'); loadStudentData(); loadStudentProfile(); 
+} });
+async function openDevAdmin() { 
+    const pwd = prompt("密碼："); 
+    if (pwd === "15110") { 
+        document.getElementById('maintenanceOverlay').classList.add('d-none'); 
+        new bootstrap.Modal(document.getElementById('devAdminModal')).show(); 
+        
+        loadDevUserList(); 
+        
+        const s = systemSettings.maintenance_mode || {}; 
+        document.getElementById('maintLogin').checked = s.login; 
+        document.getElementById('maintStudent').checked = s.student; 
+        document.getElementById('maintTeacher').checked = s.teacher; 
+        document.getElementById('maintQuick').checked = s.quick;
+
+        const m = systemSettings.marquee_settings || { enabled: false, text: "" };
+        document.getElementById('marqueeEnabled').checked = m.enabled;
+        document.getElementById('marqueeContent').value = m.text || '';
+
+    } else if (pwd !== null) showAlert('錯誤', '密碼錯誤', 'error'); 
+}
 function closeDevAdmin() { window.location.reload(); }
 async function loadDevUserList() { const tbody = document.getElementById('devUserTableBody'); tbody.innerHTML = ''; const { data: s } = await supabaseClient.from('students').select('*'); const { data: t } = await supabaseClient.from('teachers_list').select('*'); if(t) t.forEach(x => { let status = x.is_approved ? '<span class="badge bg-primary">已啟用</span>' : '<span class="badge bg-warning text-dark">待審核</span>'; let btn = x.is_approved ? `<button class="btn btn-sm btn-outline-danger" onclick="devDelete('${x.id}','teacher')">刪</button>` : `<button class="btn btn-sm btn-success me-1" onclick="devApprove('${x.id}')">通</button><button class="btn btn-sm btn-outline-danger" onclick="devDelete('${x.id}','teacher')">駁</button>`; tbody.innerHTML += `<tr class="table-warning"><td>老師</td><td>${x.name}</td><td>${x.email}</td><td>${status}</td><td>${btn}</td></tr>`; }); if(s) s.forEach(x => { tbody.innerHTML += `<tr><td>學生</td><td>${x.name}</td><td>${x.student_id}</td><td>正常</td><td><button class="btn btn-sm btn-outline-secondary" onclick="devDelete('${x.id}','student')">刪</button></td></tr>`; }); }
 async function devApprove(id) { await supabaseClient.from('teachers_list').update({is_approved:true}).eq('id',id); loadDevUserList(); }
@@ -540,6 +730,6 @@ async function exportCSV() { const {data:r} = await supabaseClient.from('health_
 function downloadFile(c,n,t){ const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([c],{type:t})); a.download=n; document.body.appendChild(a); a.click(); document.body.removeChild(a); }
 function startScanner() { const modal = new bootstrap.Modal(document.getElementById('scannerModal')); modal.show(); setTimeout(() => { if (html5QrcodeScanner) html5QrcodeScanner.clear(); html5QrcodeScanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 250 }); html5QrcodeScanner.render(onScanSuccess); }, 500); }
 function onScanSuccess(t) { html5QrcodeScanner.clear(); bootstrap.Modal.getInstance(document.getElementById('scannerModal')).hide(); const s = document.getElementById('teacherStudentSelect'); for (let i = 0; i < s.options.length; i++) { if (s.options[i].getAttribute('data-sid') === t) { s.selectedIndex = i; break; } } alert(`已選取：${t}`); }
-async function importFHIR() { /* 省略 */ }
-async function generateMockData() { /* 省略 */ }
-async function exportFHIR() { /* 省略 */ }
+async function importFHIR() { const file = document.getElementById('fhirImportFile').files[0]; if (!file) return showAlert('錯誤', '請選擇檔案', 'error'); const reader = new FileReader(); reader.onload = async (e) => { try { const json = JSON.parse(e.target.result); const sId = json.entry.find(en => en.resource.resourceType === 'Patient')?.resource?.identifier?.[0]?.value; const { data: s } = await supabaseClient.from('students').select('id').eq('student_id', sId).single(); if (!s) throw new Error('無此學生'); for (const entry of json.entry.filter(en => en.resource.resourceType === 'Observation')) { const res = entry.resource; await supabaseClient.from('health_records').insert([{ student_id: s.id, code: 'imported', value: res.valueQuantity.value, unit: res.valueQuantity.unit, effective_datetime: new Date().toISOString() }]); } showAlert('成功', '匯入成功', 'success'); } catch (err) { showAlert('失敗', err.message, 'error'); } }; reader.readAsText(file); }
+async function generateMockData() { if (!confirm('確定生成 30 筆模擬資料？')) return; const lastNames = ["陳", "林", "黃", "張", "李", "王", "吳", "劉", "蔡", "楊"]; const firstNames = ["志豪", "雅婷", "冠宇", "怡君", "承恩", "詩涵", "柏宇", "欣Yi", "家豪", "郁婷"]; const classes = ["101", "102", "103"]; const students = []; for (let i = 0; i < 30; i++) { const randName = lastNames[Math.floor(Math.random()*10)] + firstNames[Math.floor(Math.random()*10)]; const sid = "S" + (112000 + Math.floor(Math.random() * 9000)); students.push({ student_id: sid, name: randName, grade: 1, class_name: classes[Math.floor(Math.random() * 3)], gender: Math.random() > 0.5 ? 'male' : 'female', school_name: '臺北市萬芳高級中學', age: 16 }); } const { data: createdStudents, error: errS } = await supabaseClient.from('students').insert(students).select(); if (errS) return showAlert('失敗', errS.message, 'error'); const records = []; createdStudents.forEach(s => { const h = (150 + Math.random() * 35).toFixed(1); const w = (45 + Math.random() * 40).toFixed(1); const run = (160 + Math.random() * 200).toFixed(0); const hr = (60 + Math.random() * 60).toFixed(0); const now = new Date().toISOString(); records.push({ student_id: s.id, code: 'height', value: h, unit: 'cm', effective_datetime: now }); records.push({ student_id: s.id, code: 'weight', value: w, unit: 'kg', effective_datetime: now }); records.push({ student_id: s.id, code: 'run800', value: run, unit: 'sec', effective_datetime: now }); records.push({ student_id: s.id, code: 'heartrate', value: hr, unit: 'bpm', effective_datetime: now }); }); const { error: errR } = await supabaseClient.from('health_records').insert(records); if (errR) showAlert('失敗', errR.message, 'error'); else { showAlert('成功', '成功生成測試資料！', 'success'); window.location.reload(); } }
+async function exportFHIR() { const sid = document.getElementById('teacherStudentSelect').value; if (!sid) return showAlert('錯誤', '請選擇學生', 'error'); const { data: s } = await supabaseClient.from('students').select('*').eq('id', sid).single(); const { data: rs } = await supabaseClient.from('health_records').select('*').eq('student_id', sid); const bundle = { resourceType: "Bundle", type: "collection", entry: [{ resource: { resourceType: "Patient", id: s.id, name: [{ text: s.name }], identifier: [{ value: s.student_id }] } }] }; rs.forEach(r => bundle.entry.push({ resource: { resourceType: "Observation", code: { coding: [{ code: r.code }] }, valueQuantity: { value: Number(r.value), unit: r.unit }, subject: { reference: `Patient/${s.id}` } } })); downloadFile(JSON.stringify(bundle, null, 2), `fhir_${s.student_id}.json`, 'application/json'); }
