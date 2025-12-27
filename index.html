@@ -14,11 +14,6 @@
 </head>
 <body class="bg-light">
 
-    <div id="topMarquee" class="marquee-bar d-none">
-        <div class="marquee-track" id="marqueeTrack">
-            </div>
-    </div>
-
     <div id="maintenanceOverlay" class="d-none">
         <button class="btn btn-light position-absolute top-0 start-0 m-4 shadow-sm fw-bold z-3" onclick="history.back()">
             <i class="bi bi-arrow-left"></i> 返回上一頁
@@ -201,6 +196,10 @@
         </div>
     </div>
 
+    <div class="modal fade" id="cityModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-lg"><div class="modal-content border-0 shadow"><div class="modal-header border-0 pb-0"><h5 class="modal-title fw-bold">選擇縣市</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="row g-2" id="cityButtonsArea"></div></div></div></div></div>
+    <div class="modal fade" id="schoolModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content border-0 shadow"><div class="modal-header border-0"><h5 class="modal-title fw-bold" id="selectedCityTitle"></h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body p-0"><div class="list-group list-group-flush" id="schoolListArea"></div></div></div></div></div>
+    <div class="modal fade" id="quickLoginModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content border-0 shadow"><div class="modal-header bg-primary text-white"><h5 class="modal-title fw-bold">🏫 快速通關</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div><div class="modal-body p-4"><h6 class="text-primary mb-3 fw-bold" id="quickLoginSchoolName"></h6><form id="quickLoginForm"><div class="mb-3"><label class="form-label">班級</label><input type="text" class="form-control" id="quickClass" placeholder="101" required></div><div class="mb-4"><label class="form-label">座號</label><input type="number" class="form-control" id="quickSeat" placeholder="5" required></div><button type="submit" class="btn btn-primary w-100 rounded-pill">🚀 進入系統</button></form></div></div></div></div>
+    
     <div class="modal fade" id="devAdminModal" tabindex="-1">
         <div class="modal-dialog modal-xl modal-dialog-centered">
             <div class="modal-content border-0 shadow">
@@ -210,22 +209,6 @@
                 </div>
                 <div class="modal-body p-4">
                     
-                    <div class="card mb-4 border-info">
-                        <div class="card-header bg-info text-white fw-bold">📢 跑馬燈公告設定</div>
-                        <div class="card-body">
-                            <div class="form-check form-switch mb-3">
-                                <input class="form-check-input" type="checkbox" id="marqueeEnabled">
-                                <label class="form-check-label fw-bold">開啟上方跑馬燈</label>
-                            </div>
-                            <div class="mb-3">
-                                <label class="form-label small text-muted">公告內容</label>
-                                <input type="text" class="form-control" id="marqueeContent" placeholder="請輸入公告文字...">
-                            </div>
-                            <button class="btn btn-info text-white w-100" onclick="saveSystemSettings('marquee')">💾 儲存跑馬燈設定</button>
-                            <div id="adminSaveMsg_marquee" class="mt-2 text-center fw-bold text-success small" style="min-height: 20px;"></div>
-                        </div>
-                    </div>
-
                     <div class="card mb-4 border-warning">
                         <div class="card-header bg-warning text-dark fw-bold">🚧 網站維修模式設定</div>
                         <div class="card-body">
@@ -235,8 +218,8 @@
                                 <div class="col-md-3 form-check form-switch ps-5"><input class="form-check-input" type="checkbox" id="maintTeacher"><label class="form-check-label">老師主畫面</label></div>
                                 <div class="col-md-3 form-check form-switch ps-5"><input class="form-check-input" type="checkbox" id="maintQuick"><label class="form-check-label">快速登入</label></div>
                             </div>
-                            <button class="btn btn-warning w-100 mt-3" onclick="saveSystemSettings('maint')">💾 儲存維修設定</button>
-                            <div id="adminSaveMsg_maint" class="mt-2 text-center fw-bold text-success small" style="min-height: 20px;"></div>
+                            <button class="btn btn-warning w-100 mt-3" onclick="saveSystemSettings()">💾 儲存維修設定</button>
+                            <div id="adminSaveMsg" class="mt-2 text-center fw-bold text-success small"></div>
                         </div>
                     </div>
 

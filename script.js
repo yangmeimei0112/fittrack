@@ -1,5 +1,5 @@
 // --------------------------------------------------------
-// FitTrack 最終版邏輯 (v25.1 - FHIR 整合版)
+// FitTrack 最終版邏輯 (v25.2 - 修復版)
 // --------------------------------------------------------
 
 const SUPABASE_URL = 'https://szhdnodigzybxwnftdgm.supabase.co';
@@ -400,17 +400,25 @@ async function loadDevices() {
 
 async function initAppData() {
     await loadDevices(); 
-    if (currentUserRole === 'student') { await loadStudentProfile(); loadStudentData(); } 
-    else { await loadStudentListForTeacher(); loadClassStats(); }
+    if (currentUserRole === 'student') { 
+        await loadStudentProfile(); 
+        loadStudentData(); 
+    } else { 
+        await loadStudentListForTeacher(); 
+        loadClassStats(); 
+    }
 
     if (autoRefreshInterval) clearInterval(autoRefreshInterval);
     autoRefreshInterval = setInterval(() => {
         if (currentUserRole === 'student') loadStudentData();
         else if (currentUserRole === 'teacher') {
             loadClassStats();
-            const selectedStudent = document.getElementById('teacherStudentSelect').value;
-            if(selectedStudent && !selectedStudent.includes('請選擇')) {
-                document.getElementById('teacherStudentSelect').dispatchEvent(new Event('change'));
+            const s2 = document.getElementById('teacherStudentSelect');
+            if (s2) {
+                const selectedStudent = s2.value;
+                if(selectedStudent && !selectedStudent.includes('請選擇')) {
+                    s2.dispatchEvent(new Event('change'));
+                }
             }
         }
     }, 10000);
@@ -675,17 +683,62 @@ document.getElementById('recordForm').addEventListener('submit', async (e) => {
 
 async function loadStudentListForTeacher() {
     const { data } = await supabaseClient.from('students').select('id, name, student_id').order('student_id');
-    const s2 = document.getElementById('teacherStudentSelect'); s2.innerHTML = '<option selected disabled>請選擇學生...</option>';
-    if (data) { data.forEach(s => s2.innerHTML += `<option value="${s.id}" data-sid="${s.student_id}">${s.student_id} ${s.name}</option>`); }
-    s2.addEventListener('change', async (e) => {
+    const s2 = document.getElementById('teacherStudentSelect');
+    
+    // [修復重點] 安全檢查：如果找不到元件，直接結束
+    if (!s2) {
+        console.warn("警告：找不到 id='teacherStudentSelect' 的下拉選單元件。");
+        return;
+    }
+
+    s2.innerHTML = '<option selected disabled>請選擇學生...</option>';
+    if (data) { 
+        data.forEach(s => s2.innerHTML += `<option value="${s.id}" data-sid="${s.student_id}">${s.student_id} ${s.name}</option>`); 
+    }
+
+    // [優化] 使用 .onchange 取代 addEventListener
+    s2.onchange = async (e) => {
         const studentId = e.target.value;
         const { data: student } = await supabaseClient.from('students').select('*').eq('id', studentId).single();
         const { data: history } = await supabaseClient.from('health_records').select('*').eq('student_id', studentId).order('effective_datetime', {ascending: false}).limit(3);
-        document.getElementById('teacherStudentInfo').classList.add('d-none'); document.getElementById('teacherStudentDetail').classList.remove('d-none');
-        if (student) { document.getElementById('infoName').textContent = student.name; document.getElementById('infoSchool').textContent = student.school_name || ''; document.getElementById('infoClass').textContent = student.class_name; document.getElementById('infoSeat').textContent = student.seat_number; }
-        const list = document.getElementById('infoHistoryList'); list.innerHTML = '';
-        if (history && history.length) { history.forEach(r => { const date = new Date(r.effective_datetime).toLocaleDateString(); let type = r.code; if(type==='run800') type='800m'; else if(type==='height') type='身高'; else if(type==='weight') type='體重'; else if(type==='heartrate') type='心率'; list.innerHTML += `<li class="list-group-item d-flex justify-content-between align-items-center">${type} <span class="badge bg-light text-dark">${r.value} ${r.unit}</span> <small class="text-muted">${date}</small></li>`; }); } else { list.innerHTML = '<li class="list-group-item text-muted">無歷史資料</li>'; }
-    });
+        
+        const infoDiv = document.getElementById('teacherStudentInfo');
+        const detailDiv = document.getElementById('teacherStudentDetail');
+        if (infoDiv) infoDiv.classList.add('d-none');
+        if (detailDiv) detailDiv.classList.remove('d-none');
+        
+        if (student) { 
+            const setTxt = (id, val) => { const el = document.getElementById(id); if(el) el.textContent = val; };
+            setTxt('infoName', student.name);
+            setTxt('infoSchool', student.school_name || '');
+            setTxt('infoClass', student.class_name);
+            setTxt('infoSeat', student.seat_number);
+        }
+        
+        const list = document.getElementById('infoHistoryList');
+        if (list) {
+            list.innerHTML = '';
+            if (history && history.length) { 
+                history.forEach(r => { 
+                    const date = new Date(r.effective_datetime).toLocaleDateString(); 
+                    let type = r.code; 
+                    if(type==='run800') type='800m'; 
+                    else if(type==='height') type='身高'; 
+                    else if(type==='weight') type='體重'; 
+                    else if(type==='heartrate') type='心率'; 
+                    
+                    list.innerHTML += `
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            ${type} 
+                            <span class="badge bg-light text-dark">${r.value} ${r.unit}</span> 
+                            <small class="text-muted">${date}</small>
+                        </li>`; 
+                }); 
+            } else { 
+                list.innerHTML = '<li class="list-group-item text-muted">無歷史資料</li>'; 
+            }
+        }
+    };
 }
 
 // 輔助函式 (掃描、檔案處理)
